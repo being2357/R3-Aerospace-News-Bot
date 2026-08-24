@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Dict, List
@@ -16,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 MAX_MESSAGE_LENGTH = 4096
+
+
+class TelegramForbiddenError(RuntimeError):
+    """Raised when Telegram refuses a message (e.g. the user blocked the bot)."""
 
 
 def format_digest(digest: Dict[str, List[dict]]) -> str:
@@ -78,9 +84,18 @@ def send_message(token: str, chat_id: str, text: str) -> dict:
         "disable_web_page_preview": True,
     }
     response = httpx.post(url, json=payload, timeout=30.0)
+    try:
+        data = response.json()
+    except ValueError:
+        data = None
+    if response.status_code == 403 or (
+        isinstance(data, dict) and data.get("error_code") == 403
+    ):
+        raise TelegramForbiddenError(
+            f"Telegram refused the message to {chat_id} (403: user blocked the bot)."
+        )
     response.raise_for_status()
-    data = response.json()
-    if not data.get("ok"):
+    if isinstance(data, dict) and not data.get("ok"):
         raise RuntimeError(f"Telegram API returned an error: {data}")
     return data
 
@@ -108,9 +123,73 @@ def _escape_attr(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Subscriber persistence (data/subscribers.json)
+# ---------------------------------------------------------------------------
+SUBSCRIBERS_FILE = "data/subscribers.json"
+
+
+def _now_iso() -> str:
+    """Current UTC timestamp, ISO-8601, second precision."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def load_subscribers(path: str = SUBSCRIBERS_FILE) -> List[dict]:
+    """Return subscriber records, or an empty list if the file is missing/empty."""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Could not read %s; treating as empty.", path)
+        return []
+    records = data.get("subscribers", []) if isinstance(data, dict) else []
+    return [s for s in records if isinstance(s, dict) and s.get("chat_id")]
+
+
+def save_subscribers(subscribers: List[dict], path: str = SUBSCRIBERS_FILE) -> None:
+    """Atomically persist the subscriber records (creates the directory)."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump({"subscribers": subscribers}, handle, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, path)
+
+
+def get_subscribed_chat_ids(path: str = SUBSCRIBERS_FILE) -> List[str]:
+    """Return the distinct subscribed chat IDs (as strings)."""
+    return [str(s["chat_id"]) for s in load_subscribers(path)]
+
+
+def add_subscriber(chat_id: str, path: str = SUBSCRIBERS_FILE) -> bool:
+    """Persist a chat ID as a subscriber; True if it was newly added."""
+    chat_id = str(chat_id)
+    subscribers = load_subscribers(path)
+    if any(str(s.get("chat_id")) == chat_id for s in subscribers):
+        return False
+    subscribers.append({"chat_id": chat_id, "subscribed_at": _now_iso()})
+    save_subscribers(subscribers, path)
+    logger.info("Added subscriber %s (%d total).", chat_id, len(subscribers))
+    return True
+
+
+def remove_subscriber(chat_id: str, path: str = SUBSCRIBERS_FILE) -> bool:
+    """Drop a chat ID from the subscriber file; True if it was present."""
+    chat_id = str(chat_id)
+    subscribers = load_subscribers(path)
+    remaining = [s for s in subscribers if str(s.get("chat_id")) != chat_id]
+    if len(remaining) == len(subscribers):
+        return False
+    save_subscribers(remaining, path)
+    logger.info("Removed subscriber %s (%d total).", chat_id, len(remaining))
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Command handling (basic /start, /latest, /help interface)
 # ---------------------------------------------------------------------------
-START_REPLY = "Welcome to R3 Aerospace Digest! Use /latest to view recent opportunities."
+START_REPLY = (
+    "✅ You're subscribed! I'll send you the daily aerospace opportunities "
+    "digest. Use /latest to view the latest opportunities."
+)
 HELP_REPLY = "Available commands: /start, /latest, /help"
 
 
@@ -121,12 +200,16 @@ def _latest_digest() -> str:
     return get_latest_digest()
 
 
+def _command(text: str) -> str:
+    """Extract the leading command token from a message (bot mention stripped)."""
+    return (text or "").strip().split()[0].split("@")[0].lower()
+
+
 def build_reply(text: str) -> str | None:
     """Map an incoming message to a reply, or None if it is not a command."""
-    stripped = (text or "").strip()
-    if not stripped:
+    command = _command(text)
+    if not command:
         return None
-    command = stripped.split()[0].split("@")[0].lower()
     if command == "/start":
         return f"{START_REPLY}\n\n{_latest_digest()}"
     if command == "/latest":
@@ -137,12 +220,14 @@ def build_reply(text: str) -> str | None:
 
 
 def handle_update(update: dict, token: str) -> bool:
-    """Dispatch a single getUpdates update; send a reply if it is a command."""
+    """Dispatch a single getUpdates update; save subscribers and send replies."""
     message = update.get("message") or {}
     text = message.get("text")
     chat_id = message.get("chat", {}).get("id")
     if not text or chat_id is None:
         return False
+    if _command(text) == "/start":
+        add_subscriber(chat_id)
     reply = build_reply(text)
     if reply is None:
         return False

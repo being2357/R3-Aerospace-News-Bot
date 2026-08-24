@@ -10,7 +10,7 @@ jobs:
   digest:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # allow the auto-commit of latest_digest.txt
+      contents: write  # allow the auto-commit of state files
 
     steps:
       - name: Check out repository
@@ -33,10 +33,14 @@ jobs:
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
         run: python main.py
 
-      - name: Commit latest digest
+      - name: Commit and push state files
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add latest_digest.txt
-          git commit -m 'Update latest digest' || exit 0
-          git push
+          git add latest_digest.txt data/subscribers.json
+          if git diff --cached --quiet; then
+            echo 'No state changes to commit.'
+          else
+            git commit -m 'Update digest and subscriber state'
+            git push
+          fi

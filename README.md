@@ -25,9 +25,12 @@ the digest fresh daily.
 - **AI summaries** — DeepSeek (OpenAI-compatible SDK) writes two-sentence
   summaries per article.
 - **Telegram command bot** — `/start`, `/latest`, and `/help`, backed by a local
-  `latest_digest.txt` cache.
-- **Daily automation** — a GitHub Actions cron (18:00 UTC) runs the pipeline and
-  commits the refreshed digest back to the repository.
+  `latest_digest.txt` cache. Every chat that sends `/start` is persisted to
+  `data/subscribers.json` for the daily broadcast.
+- **Daily automation** — a GitHub Actions cron (18:00 UTC) runs the pipeline,
+  posts to every subscriber plus the primary `TELEGRAM_CHAT_ID`, prunes users who
+  have blocked the bot, and commits the digest + subscriber list back to the
+  repository.
 
 ## Architecture
 
@@ -37,6 +40,8 @@ config/sources.json ──► scrapers/feed_parser.py   ─┐
                         scrapers/http_utils.py      │      │                 │
                                                    │      │                 ▼
                         storage/sheets_client.py ◄──┴── latest_digest.txt ─ notifier/telegram_bot.py
+                                                                                 ▲
+                                                   data/subscribers.json ────────┘
 ```
 
 | Path | Purpose |
@@ -47,9 +52,10 @@ config/sources.json ──► scrapers/feed_parser.py   ─┐
 | `scrapers/http_utils.py` | Shared fetch with timeout/retry/User-Agent |
 | `storage/sheets_client.py` | Google Sheets auth + dedup + logging |
 | `summarizer/ai_engine.py` | DeepSeek classification + summarization |
-| `notifier/telegram_bot.py` | Telegram HTML delivery + command bot |
-| `main.py` | Orchestrator + topic filter + dedup + digest cache |
-| `.github/workflows/daily_digest.yml` | Daily cron + digest auto-commit |
+| `notifier/telegram_bot.py` | Telegram HTML delivery + command bot + subscriber persistence |
+| `main.py` | Orchestrator + topic filter + dedup + digest cache + multi-recipient send |
+| `data/subscribers.json` | Persisted subscriber chat IDs (added on `/start`, pruned on block) |
+| `.github/workflows/daily_digest.yml` | Daily cron + state-file auto-commit |
 | `models.py` | Shared `Article` dataclass + category/section constants |
 
 ## How it runs
@@ -57,14 +63,17 @@ config/sources.json ──► scrapers/feed_parser.py   ─┐
 There are two entry points:
 
 1. **Daily pipeline** — `python main.py` scrapes sources, filters, classifies,
-   summarizes, logs to Sheets, posts the digest to the configured Telegram chat,
-   and writes `latest_digest.txt`.
+   summarizes, logs to Sheets, then posts the digest to every chat in
+   `data/subscribers.json` plus the primary `TELEGRAM_CHAT_ID`, and writes
+   `latest_digest.txt`.
 2. **Command bot** — `python -m notifier.telegram_bot` long-polls Telegram and
-   answers commands from the `latest_digest.txt` cache.
+   answers commands from the `latest_digest.txt` cache, saving each `/start` chat
+   to `data/subscribers.json`.
 
 The GitHub Actions cron runs the daily pipeline and commits `latest_digest.txt`
-back to the repository, so the digest is versioned (and available after a
-`git pull` for a bot running elsewhere).
+and `data/subscribers.json` back to the repository, so both the digest and the
+subscriber list are versioned (and available after a `git pull` for a bot running
+elsewhere).
 
 ## Prerequisites
 
@@ -131,9 +140,13 @@ A: Timestamp   B: Source   C: Title   D: URL   E: Category   F: Sent Flag
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and set
    `TELEGRAM_BOT_TOKEN`.
-2. Set `TELEGRAM_CHAT_ID` to the chat/channel for the daily post. For a private
-   chat, message your bot and read the ID from the `getUpdates` endpoint, or add
-   the bot to a channel and use the channel ID (e.g. `@mychannel`).
+2. Set `TELEGRAM_CHAT_ID` to the primary chat/channel that always receives the
+   daily post. For a private chat, message your bot and read the ID from the
+   `getUpdates` endpoint, or add the bot to a channel and use the channel ID
+   (e.g. `@mychannel`).
+3. Anyone who messages the bot with `/start` is automatically added to
+   `data/subscribers.json` and receives the digest on every run, alongside the
+   primary `TELEGRAM_CHAT_ID`.
 
 ### 5. DeepSeek
 
@@ -185,7 +198,7 @@ Commands:
 
 | Command | Response |
 |---|---|
-| `/start` | Welcome message + the latest digest |
+| `/start` | Subscribes the chat + confirmation + the latest digest |
 | `/latest` | The latest digest |
 | `/help` | List of available commands |
 
@@ -200,8 +213,9 @@ post is sent. Set `LOG_LEVEL=DEBUG` for verbose output.
    `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DEEPSEEK_API_KEY`,
    `GCP_SERVICE_ACCOUNT_KEY`, `GOOGLE_SHEET_ID`.
 3. The workflow runs daily at **18:00 UTC** (and on manual dispatch), then
-   commits `latest_digest.txt` back to the repository. The job declares
-   `permissions: contents: write`, which the auto-commit requires.
+   commits `latest_digest.txt` and `data/subscribers.json` back to the repository.
+   The job declares `permissions: contents: write`, which the auto-commit
+   requires.
 
 > GitHub Actions schedules are approximate and can be delayed by minutes; the
 > cron time is always interpreted in UTC.
@@ -213,8 +227,11 @@ post is sent. Set `LOG_LEVEL=DEBUG` for verbose output.
 - **Empty/invalid feeds** — logged and skipped.
 - **DeepSeek failure** — falls back to a titles-and-links-only digest grouped by
   each source's category hint.
-- **Telegram send failure** — the run exits non-zero (visible in Actions) and
-  the affected articles stay "unsent" so they are retried on the next run.
+- **Telegram send failure** — per-recipient failures are logged and skipped; if
+  the digest reaches no recipient at all, the run exits non-zero (visible in
+  Actions) and the affected articles stay "unsent" so they are retried.
+- **Blocked user** — a `403 Forbidden` from Telegram removes that chat from
+  `data/subscribers.json` (committed by the workflow) so it is not retried.
 - **Auth failures** — raised with a clear message (e.g. "share the sheet with
   the service-account email").
 

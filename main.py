@@ -328,18 +328,30 @@ def main() -> None:
         [a for a in fresh if a.url in delivered_urls], sent=False
     )
 
-    # 8. Post to Telegram, then mark everything delivered as sent.
-    try:
-        sent_count = telegram_bot.send_digest(
-            digest, telegram_token, telegram_chat_id
-        )
-        logger.info("Sent %d Telegram message(s).", sent_count)
-        delivered = [a for a in to_process if a.url in delivered_urls]
-        sheets.mark_sent(delivered)
-        logger.info("Marked %d article(s) as sent.", len(delivered))
-    except Exception as exc:
-        logger.exception("Failed to post digest to Telegram: %s", exc)
+    # 8. Post to Telegram: the primary channel plus every subscriber. Per-chat
+    #    failures are isolated so one blocked user never aborts the whole run.
+    subscribers = telegram_bot.get_subscribed_chat_ids()
+    recipients = list(dict.fromkeys([*subscribers, telegram_chat_id]))
+    logger.info("Sending digest to %d recipient(s).", len(recipients))
+    delivered_any = False
+    for chat_id in recipients:
+        try:
+            telegram_bot.send_digest(digest, telegram_token, chat_id)
+            delivered_any = True
+            logger.info("Sent digest to chat %s.", chat_id)
+        except telegram_bot.TelegramForbiddenError as exc:
+            logger.warning("%s Removing from subscribers.", exc)
+            telegram_bot.remove_subscriber(chat_id)
+        except Exception as exc:
+            logger.warning("Failed to send digest to chat %s: %s", chat_id, exc)
+
+    if not delivered_any:
+        logger.error("Digest was not delivered to any recipient.")
         sys.exit(1)
+
+    delivered = [a for a in to_process if a.url in delivered_urls]
+    sheets.mark_sent(delivered)
+    logger.info("Marked %d article(s) as sent.", len(delivered))
 
 
 if __name__ == "__main__":
