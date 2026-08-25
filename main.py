@@ -182,6 +182,15 @@ def save_digest(text: str, path: str = DIGEST_FILE) -> None:
     logger.info("Saved latest digest to %s", path)
 
 
+def _notify_no_new_content(token: str, primary_chat_id: str) -> None:
+    """Broadcast the friendly "caught up" notice to every subscriber + primary chat."""
+    recipients = list(
+        dict.fromkeys([*telegram_bot.get_subscribed_chat_ids(), primary_chat_id])
+    )
+    logger.info("Sending no-new-content notice to %d recipient(s).", len(recipients))
+    telegram_bot.send_notice(token, recipients)
+
+
 def setup_logging() -> None:
     level = os.getenv("LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
@@ -307,8 +316,9 @@ def main() -> None:
     logger.info("Fresh articles: %d, retry queue: %d.", len(fresh), len(unsent))
 
     if not to_process:
-        logger.info("No new opportunities to send. Exiting silently.")
+        logger.info("No new opportunities to send.")
         save_digest(NO_OPPORTUNITIES_MESSAGE)
+        _notify_no_new_content(telegram_token, telegram_chat_id)
         return
 
     # 6. Classify + summarize via DeepSeek (falls back to titles-only).
@@ -325,6 +335,7 @@ def main() -> None:
     if not delivered_urls:
         logger.info("No articles survived strict classification; nothing to post.")
         save_digest(NO_OPPORTUNITIES_MESSAGE)
+        _notify_no_new_content(telegram_token, telegram_chat_id)
         return
 
     # 7. Cache the digest text, then log the delivered fresh articles.

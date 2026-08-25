@@ -112,6 +112,35 @@ def send_digest(
     return len(chunks)
 
 
+CATCH_UP_MESSAGE = (
+    "🚀 You're all caught up! No new aerospace opportunities found today. "
+    "Check back tomorrow!"
+)
+
+
+def send_notice(
+    token: str, chat_ids: List[str], text: str = CATCH_UP_MESSAGE
+) -> int:
+    """Send a plain-text notice to each chat, isolating per-chat failures.
+
+    Blocked users (403) are pruned from the subscriber list. Returns the number
+    of chats that received the notice. Never raises — a failed notice must not
+    turn an otherwise-empty day into a failed pipeline run.
+    """
+    delivered = 0
+    for chat_id in chat_ids:
+        try:
+            send_message(token, str(chat_id), text)
+            delivered += 1
+            logger.info("Sent notice to chat %s.", chat_id)
+        except TelegramForbiddenError as exc:
+            logger.warning("%s Removing from subscribers.", exc)
+            remove_subscriber(chat_id)
+        except Exception as exc:
+            logger.warning("Failed to send notice to chat %s: %s", chat_id, exc)
+    return delivered
+
+
 def _escape(text: str) -> str:
     """Escape text content for Telegram HTML (does not escape quotes)."""
     return html.escape(text, quote=False)

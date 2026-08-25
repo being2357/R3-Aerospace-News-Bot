@@ -86,7 +86,8 @@ config/sources.json ──► scrapers/feed_parser.py   ─┐
 10. **Mark sent** — flag delivered articles in Sheets so they are not retried.
 
 If no new opportunities survive filtering, the pipeline writes a "no
-opportunities" cache and exits without posting.
+opportunities" cache, then broadcasts a friendly "caught up" notice to every
+subscriber plus the primary chat, and exits successfully.
 
 ## Subscriber handling (`data/subscribers.json`)
 
@@ -296,7 +297,7 @@ add a `git pull --rebase origin main` before the `git push` in the commit step.
 | `Failed to decode GCP_SERVICE_ACCOUNT_KEY` | Value isn't valid Base64 of a service-account JSON |
 | `/latest` returns "No digest available yet" | `latest_digest.txt` not generated — run `python main.py` |
 | `getUpdates` error | Wrong `TELEGRAM_BOT_TOKEN` |
-| No message, no error | No new opportunities — expected silent exit |
+| A "You're all caught up" notice, no digest | No new opportunities — the catch-up notice is the expected output |
 
 ---
 

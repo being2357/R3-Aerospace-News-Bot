@@ -207,8 +207,9 @@ Commands:
 | `/help` | List of available commands |
 
 If there are no new opportunities, the cache is set to
-"No new opportunities, competitions, or events found today." and no Telegram
-post is sent. Set `LOG_LEVEL=DEBUG` for verbose output.
+"No new opportunities, competitions, or events found today." and the pipeline
+sends a friendly "caught up" notice to every subscriber plus the primary chat.
+Set `LOG_LEVEL=DEBUG` for verbose output.
 
 ## GitHub Actions
 
@@ -248,4 +249,4 @@ post is sent. Set `LOG_LEVEL=DEBUG` for verbose output.
 | `DEEPSEEK_API_KEY is not set` | Missing secret / `.env` entry. |
 | `/latest` returns "No digest available yet" | `latest_digest.txt` not generated yet — run `python main.py`. |
 | `getUpdates` error when running the bot | Wrong `TELEGRAM_BOT_TOKEN`. |
-| No message, no error | No new opportunities — this is the expected silent exit. |
+| A "You're all caught up" notice, no digest | No new opportunities — the catch-up notice is the expected output. |
