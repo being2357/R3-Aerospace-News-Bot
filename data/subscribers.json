@@ -1,6 +1,15 @@
 {
-  "subscribers": [{
+  "subscribers": [
+    {
       "chat_id": "6672388491",
       "subscribed_at": "2026-08-25T18:44:00Z"
-    }]
+    },
+    {
+      "chat_id": "5636898169",
+      "subscribed_at": "2026-08-25T13:46:48+00:00",
+      "first_name": "Rizwan",
+      "last_name": "Nizar",
+      "chat_type": "private"
+    }
+  ]
 }
