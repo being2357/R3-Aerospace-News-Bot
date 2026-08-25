@@ -27,7 +27,7 @@ entry points share one codebase:
 
 | Entry point | Command | Role |
 |---|---|---|
-| Daily pipeline | `python main.py` | Scrape → filter → classify → summarize → **broadcast** to all subscribers + primary chat |
+| Daily pipeline | `python main.py` | Onboard pending subscribers → scrape → filter → classify → summarize → **broadcast** to all subscribers + primary chat |
 | Command bot | `python -m notifier.telegram_bot` | Long-poll Telegram, answer `/start` `/latest` `/help`, persist new subscribers |
 
 A GitHub Actions cron runs the daily pipeline and commits the resulting state
@@ -53,7 +53,7 @@ config/sources.json ──► scrapers/feed_parser.py   ─┐
 | `scrapers/http_utils.py` | Shared fetch with timeout/retry/User-Agent |
 | `storage/sheets_client.py` | Google Sheets auth + URL dedup + sent-flag logging |
 | `summarizer/ai_engine.py` | DeepSeek classification + summarization |
-| `notifier/telegram_bot.py` | Telegram HTML delivery + command bot + subscriber persistence |
+| `notifier/telegram_bot.py` | Telegram HTML delivery + command bot + subscriber onboarding/persistence |
 | `main.py` | Orchestrator + topic filter + dedup + digest cache + multi-recipient send |
 | `data/subscribers.json` | Persisted subscriber chat IDs (added on `/start`, pruned on block) |
 | `latest_digest.txt` | Cached digest text served by `/latest` and `/start` |
@@ -64,6 +64,10 @@ config/sources.json ──► scrapers/feed_parser.py   ─┐
 
 `main.py` runs these stages in order:
 
+0. **Onboard subscribers** — a one-shot `getUpdates` pass (`catch_up_subscribers`)
+   that subscribes any chat that sent `/start` or added the bot to a group since
+   the last run, sends each a confirmation, and advances the offset to clear
+   Telegram's update queue.
 1. **Load config** — read `config/sources.json`, normalize each source's category.
 2. **Authenticate Sheets** — decode `GCP_SERVICE_ACCOUNT_KEY`, open the sheet,
    ensure the header row, and load existing URLs for dedup.
@@ -94,22 +98,35 @@ tracked JSON file so the CI run (and any bot host that pulls) share one list.
 ```json
 {
   "subscribers": [
-    { "chat_id": "123456789", "subscribed_at": "2026-08-24T12:00:00+00:00" }
+    {
+      "chat_id": "123456789",
+      "subscribed_at": "2026-08-24T12:00:00+00:00",
+      "username": "jane_doe",
+      "first_name": "Jane",
+      "last_name": "Doe",
+      "chat_type": "private"
+    }
   ]
 }
 ```
 
 - `chat_id` — the Telegram chat ID as a string.
 - `subscribed_at` — UTC ISO-8601 timestamp of first `/start` (informational).
+- Optional metadata captured on signup: `username`, `first_name`, `last_name`,
+  `chat_type` (`private`/`group`/`supergroup`), and `title` (for group chats).
 
 An empty file is `{"subscribers": []}`.
 
 ### Lifecycle
 
-- **Add** — when the command bot receives `/start`, `handle_update` calls
-  `add_subscriber(chat_id)` before replying. It dedupes by `chat_id` and records
-  `subscribed_at` on first sight. The chat then receives a confirmation plus the
-  latest digest.
+- **Add** — two paths subscribe a chat:
+  - The command bot's `handle_update` calls `add_subscriber(chat_id)` on `/start`
+    and replies with a confirmation plus the latest digest.
+  - The daily pipeline's startup pass `catch_up_subscribers` onboards any pending
+    `/start` or group-join (`new_chat_members`) updates before scraping, so a
+    subscriber who signed up after the last run still gets that day's digest.
+  `add_subscriber` dedupes by `chat_id`, records `subscribed_at` (plus optional
+  user metadata) on first sight, and returns `True` only when newly added.
 - **Read** — `main.py` calls `get_subscribed_chat_ids()` to build the recipient
   list for each broadcast.
 - **Prune** — if a send to a subscriber fails with Telegram `403` (the user
@@ -123,13 +140,15 @@ An empty file is `{"subscribers": []}`.
 | `load_subscribers(path=...)` | Return subscriber records (empty list if missing/corrupt) |
 | `save_subscribers(records, path=...)` | Atomic write via `.tmp` + `os.replace` |
 | `get_subscribed_chat_ids(path=...)` | Distinct chat IDs as strings |
-| `add_subscriber(chat_id, path=...)` | Add if new; return `True` when added |
+| `add_subscriber(chat_id, metadata=None, path=...)` | Add if new (with optional user metadata); return `True` when added |
+| `catch_up_subscribers(token)` | One-shot `getUpdates` pass; onboards `/start`/join chats, then clears the update queue |
 | `remove_subscriber(chat_id, path=...)` | Drop if present; return `True` when removed |
 
-> **Note:** the bot host that runs `/start` writes to its *local* copy of
-> `data/subscribers.json`. Those additions reach the CI run when that host
-> commits/pushes (or `git pull`s). The CI side only adds *removals* (blocked
-> users) — it never adds new subscribers.
+> **Note:** subscriber additions can originate from either side — the command
+> bot host (on `/start`) or the CI pipeline's startup pass
+> (`catch_up_subscribers`). Both write `data/subscribers.json`, so keep the file
+> in sync across hosts (commit and `git pull`). The CI run also records
+> *removals* (blocked users) and commits the result.
 
 ## Multi-recipient dispatch (`main.py`)
 

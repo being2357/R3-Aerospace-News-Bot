@@ -159,13 +159,23 @@ def get_subscribed_chat_ids(path: str = SUBSCRIBERS_FILE) -> List[str]:
     return [str(s["chat_id"]) for s in load_subscribers(path)]
 
 
-def add_subscriber(chat_id: str, path: str = SUBSCRIBERS_FILE) -> bool:
-    """Persist a chat ID as a subscriber; True if it was newly added."""
+def add_subscriber(
+    chat_id: str, metadata: dict | None = None, path: str = SUBSCRIBERS_FILE
+) -> bool:
+    """Persist a chat ID as a subscriber; True if it was newly added.
+
+    Optional *metadata* (e.g. username, first/last name, chat type) is merged
+    into the record so the subscriber list carries a little user context.
+    """
     chat_id = str(chat_id)
     subscribers = load_subscribers(path)
     if any(str(s.get("chat_id")) == chat_id for s in subscribers):
         return False
-    subscribers.append({"chat_id": chat_id, "subscribed_at": _now_iso()})
+    record = {"chat_id": chat_id, "subscribed_at": _now_iso()}
+    for key, value in (metadata or {}).items():
+        if value is not None and key not in record:
+            record[key] = value
+    subscribers.append(record)
     save_subscribers(subscribers, path)
     logger.info("Added subscriber %s (%d total).", chat_id, len(subscribers))
     return True
@@ -262,6 +272,87 @@ def run_polling(token: str, timeout: int = 30) -> None:
         except httpx.HTTPError as exc:
             logger.warning("getUpdates request failed: %s", exc)
             time.sleep(5)
+
+
+# ---------------------------------------------------------------------------
+# Pending-subscriber onboarding (one-shot getUpdates before each scrape)
+# ---------------------------------------------------------------------------
+ONBOARD_CONFIRM = "✅ You are subscribed to Daily Aerospace Digest!"
+
+
+def _onboard_update(update: dict, token: str) -> None:
+    """Add the update's chat as a subscriber and confirm, if it is a /start or join."""
+    message = update.get("message") or {}
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    if chat_id is None:
+        return
+
+    is_start = _command(message.get("text")) == "/start"
+    is_join = bool(message.get("new_chat_members"))
+    if not (is_start or is_join):
+        return
+
+    from_user = message.get("from") or {}
+    metadata = {
+        "username": from_user.get("username"),
+        "first_name": from_user.get("first_name"),
+        "last_name": from_user.get("last_name"),
+        "chat_type": chat.get("type"),
+        "title": chat.get("title"),
+    }
+    metadata = {k: v for k, v in metadata.items() if v is not None}
+
+    if not add_subscriber(chat_id, metadata=metadata):
+        return  # already subscribed; no confirmation needed
+
+    try:
+        send_message(token, str(chat_id), ONBOARD_CONFIRM)
+        logger.info("Onboarded subscriber %s and sent confirmation.", chat_id)
+    except TelegramForbiddenError as exc:
+        logger.warning("%s Removing from subscribers.", exc)
+        remove_subscriber(chat_id)
+    except Exception as exc:
+        logger.warning("Failed to send confirmation to %s: %s", chat_id, exc)
+
+
+def catch_up_subscribers(token: str) -> None:
+    """Fetch and onboard pending subscribers, then clear Telegram's update queue.
+
+    Runs once before the daily scrape so chats that sent /start (or added the
+    bot to a group) since the last run are subscribed and included in that day's
+    dispatch. Advancing the offset confirms each processed update so Telegram
+    does not redeliver it.
+    """
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    offset = 0
+    while True:
+        try:
+            response = httpx.post(
+                url, json={"offset": offset, "timeout": 0}, timeout=30.0
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPError as exc:
+            logger.warning("getUpdates request failed: %s", exc)
+            return
+        except ValueError:
+            logger.warning("getUpdates returned a non-JSON response.")
+            return
+
+        if not isinstance(data, dict) or not data.get("ok"):
+            logger.error("getUpdates returned an error: %s", data)
+            return
+
+        updates = data.get("result", [])
+        if not updates:
+            return
+        for update in updates:
+            offset = max(offset, int(update.get("update_id", 0)) + 1)
+            try:
+                _onboard_update(update, token)
+            except Exception as exc:
+                logger.exception("Failed to onboard an update: %s", exc)
 
 
 if __name__ == "__main__":

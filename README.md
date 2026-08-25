@@ -26,7 +26,8 @@ the digest fresh daily.
   summaries per article.
 - **Telegram command bot** — `/start`, `/latest`, and `/help`, backed by a local
   `latest_digest.txt` cache. Every chat that sends `/start` is persisted to
-  `data/subscribers.json` for the daily broadcast.
+  `data/subscribers.json` for the daily broadcast, and the pipeline's startup
+  pass onboards any pending `/start` or group-join before scraping.
 - **Daily automation** — a GitHub Actions cron (18:00 UTC) runs the pipeline,
   posts to every subscriber plus the primary `TELEGRAM_CHAT_ID`, prunes users who
   have blocked the bot, and commits the digest + subscriber list back to the
@@ -52,7 +53,7 @@ config/sources.json ──► scrapers/feed_parser.py   ─┐
 | `scrapers/http_utils.py` | Shared fetch with timeout/retry/User-Agent |
 | `storage/sheets_client.py` | Google Sheets auth + dedup + logging |
 | `summarizer/ai_engine.py` | DeepSeek classification + summarization |
-| `notifier/telegram_bot.py` | Telegram HTML delivery + command bot + subscriber persistence |
+| `notifier/telegram_bot.py` | Telegram HTML delivery + command bot + subscriber onboarding/persistence |
 | `main.py` | Orchestrator + topic filter + dedup + digest cache + multi-recipient send |
 | `data/subscribers.json` | Persisted subscriber chat IDs (added on `/start`, pruned on block) |
 | `.github/workflows/daily_digest.yml` | Daily cron + state-file auto-commit |
@@ -62,8 +63,9 @@ config/sources.json ──► scrapers/feed_parser.py   ─┐
 
 There are two entry points:
 
-1. **Daily pipeline** — `python main.py` scrapes sources, filters, classifies,
-   summarizes, logs to Sheets, then posts the digest to every chat in
+1. **Daily pipeline** — `python main.py` first onboards pending subscribers (a
+   one-shot `getUpdates` pass), then scrapes sources, filters, classifies,
+   summarizes, logs to Sheets, posts the digest to every chat in
    `data/subscribers.json` plus the primary `TELEGRAM_CHAT_ID`, and writes
    `latest_digest.txt`.
 2. **Command bot** — `python -m notifier.telegram_bot` long-polls Telegram and
@@ -144,9 +146,11 @@ A: Timestamp   B: Source   C: Title   D: URL   E: Category   F: Sent Flag
    daily post. For a private chat, message your bot and read the ID from the
    `getUpdates` endpoint, or add the bot to a channel and use the channel ID
    (e.g. `@mychannel`).
-3. Anyone who messages the bot with `/start` is automatically added to
-   `data/subscribers.json` and receives the digest on every run, alongside the
-   primary `TELEGRAM_CHAT_ID`.
+3. Anyone who messages the bot with `/start` (or adds the bot to a group) is
+   automatically added to `data/subscribers.json` and receives the digest on
+   every run, alongside the primary `TELEGRAM_CHAT_ID`. The pipeline picks up
+   pending sign-ups at the start of each run, so new subscribers are included in
+   the same day's digest.
 
 ### 5. DeepSeek
 

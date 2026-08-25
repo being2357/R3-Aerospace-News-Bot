@@ -256,6 +256,11 @@ def main() -> None:
     telegram_chat_id = require_env("TELEGRAM_CHAT_ID")
     deepseek_key = os.getenv("DEEPSEEK_API_KEY")
 
+    # 0. Onboard any pending subscribers (chats that sent /start or added the
+    #    bot to a group since the last run) before we scrape, so they are
+    #    included in today's dispatch. This also clears Telegram's update queue.
+    telegram_bot.catch_up_subscribers(telegram_token)
+
     # 1. Google Sheets: authenticate and load existing URLs for dedup.
     sheets = SheetsClient(service_account_key, sheet_id)
     sheets.ensure_header()
