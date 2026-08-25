@@ -10,6 +10,14 @@
       "first_name": "Rizwan",
       "last_name": "Nizar",
       "chat_type": "private"
+    },
+    {
+      "chat_id": "-1004279104642",
+      "subscribed_at": "2026-08-25T14:01:11+00:00",
+      "first_name": "No",
+      "last_name": "One",
+      "chat_type": "supergroup",
+      "title": "Testing for bot"
     }
   ]
 }
