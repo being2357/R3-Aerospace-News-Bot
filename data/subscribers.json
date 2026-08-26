@@ -18,6 +18,14 @@
       "last_name": "One",
       "chat_type": "supergroup",
       "title": "Testing for bot"
+    },
+    {
+      "chat_id": "5686722633",
+      "subscribed_at": "2026-08-26T19:30:10+00:00",
+      "username": "Ani_rudh17",
+      "first_name": "Anirudh",
+      "last_name": "N",
+      "chat_type": "private"
     }
   ]
 }
