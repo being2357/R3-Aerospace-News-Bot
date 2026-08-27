@@ -26,6 +26,13 @@
       "first_name": "Anirudh",
       "last_name": "N",
       "chat_type": "private"
+    },
+    {
+      "chat_id": "5043876418",
+      "subscribed_at": "2026-08-27T09:36:51+00:00",
+      "first_name": "Anna",
+      "last_name": "Thomas",
+      "chat_type": "private"
     }
   ]
 }
