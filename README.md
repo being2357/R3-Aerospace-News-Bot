@@ -9,9 +9,10 @@ the digest fresh daily.
 
 ## What it does
 
-- **Targeted ingestion** — RSS/Atom via `feedparser`, plus an HTML fallback via
-  `httpx` + `BeautifulSoup`, pointed at careers, opportunity, and event pages
-  (NASA internships, ESA Academy, CanSat, Space Apps, AIAA student conferences).
+- **Targeted ingestion** — RSS/Atom via `feedparser`, a JSON API scraper for NASA
+  (WordPress REST), and a concurrent HTML fallback via `httpx` + `BeautifulSoup`
+  for sites with no public API (ESA Academy, CanSat, Space Apps, AIAA, ISRO/DRDO).
+  Every fetch uses conditional GET (ETag/Last-Modified) and tenacity retries.
 - **Two-stage relevance filtering** — a keyword pre-filter in `main.py` drops
   navigation links, boilerplate, and general space news; DeepSeek then strictly
   classifies each item and **discards anything that doesn't fit**.
@@ -19,9 +20,10 @@ the digest fresh daily.
   - 🎓 Internships & Student Opportunities
   - 🏆 Competitions & Hackathons
   - 📅 Conferences & Upcoming Events
-- **Deduplication** — URL dedup against Google Sheets (Column D) plus same-source
-  title-similarity dedup so recurring posts (team profiles, event reminders)
-  collapse into the primary announcement.
+- **Deduplication** — URL dedup against Google Sheets (Column D), a persisted
+  `(title, url)` hash "seen" store (so already-processed items are skipped before
+  DeepSeek), plus same-source title-similarity dedup so recurring posts collapse
+  into the primary announcement.
 - **AI summaries** — DeepSeek (OpenAI-compatible SDK) writes two-sentence
   summaries per article.
 - **Telegram command bot** — `/start`, `/latest`, and `/help`, backed by a local
@@ -36,26 +38,31 @@ the digest fresh daily.
 ## Architecture
 
 ```
-config/sources.json ──► scrapers/feed_parser.py   ─┐
-                        scrapers/web_scraper.py     ├─► main.py ─► summarizer/ai_engine.py
-                        scrapers/http_utils.py      │      │                 │
-                                                   │      │                 ▼
-                        storage/sheets_client.py ◄──┴── latest_digest.txt ─ notifier/telegram_bot.py
-                                                                                 ▲
-                                                   data/subscribers.json ────────┘
+config/sources.json ──► scrapers/feed_parser.py   (RSS/Atom)
+                        scrapers/web_scraper.py    (HTML, async)
+                        scrapers/nasa_scraper.py   (JSON API)
+                        scrapers/http_utils.py     (shared httpx + tenacity)
+                        cache_store.py  dedup.py   (etag + seen state)
+
+main.py ─► summarizer/ai_engine.py (DeepSeek) ─► storage/sheets_client.py
+       └─► notifier/telegram_bot.py ◄── latest_digest.txt, data/subscribers.json
 ```
 
 | Path | Purpose |
 |---|---|
-| `config/sources.json` | Source registry (RSS + web targets, category hint) |
-| `scrapers/feed_parser.py` | RSS/Atom ingestion (captures title + summary) |
-| `scrapers/web_scraper.py` | HTML fallback scraper |
-| `scrapers/http_utils.py` | Shared fetch with timeout/retry/User-Agent |
-| `storage/sheets_client.py` | Google Sheets auth + dedup + logging |
+| `config/sources.json` | Source registry (RSS, HTML, JSON API targets; category hint) |
+| `scrapers/feed_parser.py` | RSS/Atom ingestion with conditional GET (ETag/Last-Modified) |
+| `scrapers/web_scraper.py` | Concurrent HTML fallback scraper (`httpx.AsyncClient` + `asyncio.gather`) |
+| `scrapers/nasa_scraper.py` | NASA JSON ingestion via the WordPress REST API |
+| `scrapers/http_utils.py` | Shared fetch: User-Agent, timeouts, tenacity retries, conditional GET |
+| `cache_store.py` | JSON-file key/value store for cross-run state (`cache/`) |
+| `dedup.py` | `item_hash` + persisted "seen" store (dedup before DeepSeek) |
+| `storage/sheets_client.py` | Google Sheets auth + URL dedup + sent-flag logging |
 | `summarizer/ai_engine.py` | DeepSeek classification + summarization |
 | `notifier/telegram_bot.py` | Telegram HTML delivery + command bot + subscriber onboarding/persistence |
 | `main.py` | Orchestrator + topic filter + dedup + digest cache + multi-recipient send |
 | `data/subscribers.json` | Persisted subscriber chat IDs (added on `/start`, pruned on block) |
+| `cache/` | Persisted ETag/Last-Modified + seen-hash state (committed + actions/cache) |
 | `.github/workflows/daily_digest.yml` | Daily cron + state-file auto-commit |
 | `models.py` | Shared `Article` dataclass + category/section constants |
 
@@ -72,10 +79,10 @@ There are two entry points:
    answers commands from the `latest_digest.txt` cache, saving each `/start` chat
    to `data/subscribers.json`.
 
-The GitHub Actions cron runs the daily pipeline and commits `latest_digest.txt`
-and `data/subscribers.json` back to the repository, so both the digest and the
-subscriber list are versioned (and available after a `git pull` for a bot running
-elsewhere).
+The GitHub Actions cron runs the daily pipeline and commits `latest_digest.txt`,
+`data/subscribers.json`, and the `cache/` state back to the repository, so the
+digest, subscriber list, and cross-run ETag/seen state are versioned (and
+available after a `git pull` for a bot running elsewhere).
 
 ## Prerequisites
 
@@ -159,27 +166,54 @@ Set `DEEPSEEK_API_KEY` (and optionally `DEEPSEEK_MODEL` to override the default
 
 ### 6. Configure sources
 
-Edit `config/sources.json`. Each entry supports:
+Edit `config/sources.json`. Each entry carries a `type` that selects the scraper:
+
+| `type` | Scraper | Meaning |
+|---|---|---|
+| `rss` | `scrapers/feed_parser.py` | RSS/Atom feed (fetched with conditional GET) |
+| `api` | `scrapers/nasa_scraper.py` | JSON API (NASA WordPress REST); `query` lists search terms |
+| `html_list` | `scrapers/web_scraper.py` | Single HTML page parsed with CSS selectors |
+| `html_multi` | `scrapers/web_scraper.py` | Many HTML pages (`urls` list) fetched concurrently |
+| `web` | `scrapers/web_scraper.py` | Legacy alias for a single HTML page |
+
+HTML sources:
 
 ```json
 {
   "id": "esa_academy",
   "name": "ESA Academy (Student Opportunities)",
-  "type": "web",
+  "type": "html_list",
   "url": "https://www.esa.int/Education/ESA_Academy",
   "category": "internships",
-  "css_selectors": { "link": "a[href]", "title": "h2" }
+  "selectors": { "item": "a[href]", "title": "h2" }
 }
 ```
 
-- `type` — `"rss"` or `"web"`.
+JSON API sources (NASA):
+
+```json
+{
+  "id": "nasa_internships",
+  "name": "NASA Internships & Careers",
+  "type": "api",
+  "parser": "nasa_wp",
+  "query": ["internship", "fellowship"],
+  "category": "internships"
+}
+```
+
+- `type` — `"rss"`, `"api"`, `"html_list"`, `"html_multi"`, or `"web"`.
 - `category` — a *hint* (`internships`, `competitions`, or `conferences`). The
   AI re-classifies every article, so this only biases the fallback path.
-- `css_selectors` — for `"web"` sources only. `link` (required) matches `<a>`
-  elements; `title` (optional) selects the title within the anchor.
+- `selectors` (HTML only) — `item` matches the container/`<a>` elements, `link`
+  selects the anchor *within* an `item` container (optional), and `title` selects
+  the title text (optional). `css_selectors` with `{ "link": ..., "title": ... }`
+  is still accepted as a legacy alias.
+- `urls` (HTML `html_multi` only) — a list of pages; each is fetched concurrently.
+- `query` (`api` only) — search terms passed to the NASA posts API.
 
-> **Note:** web selectors are site-specific and can break if a site redesigns.
-> If a `web` source yields nothing, inspect the page and update `css_selectors`.
+> **Note:** HTML selectors are site-specific and can break if a site redesigns.
+> If an HTML source yields nothing, inspect the page and update `selectors`.
 
 ## Running locally
 
@@ -218,17 +252,23 @@ Set `LOG_LEVEL=DEBUG` for verbose output.
    `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DEEPSEEK_API_KEY`,
    `GCP_SERVICE_ACCOUNT_KEY`, `GOOGLE_SHEET_ID`.
 3. The workflow runs daily at **18:00 UTC** (and on manual dispatch), then
-   commits `latest_digest.txt` and `data/subscribers.json` back to the repository.
-   The job declares `permissions: contents: write`, which the auto-commit
-   requires.
+   commits `latest_digest.txt`, `data/subscribers.json`, and `cache/` back to the
+   repository (and restores `cache/` via `actions/cache`). The job declares
+   `permissions: contents: write`, which the auto-commit requires.
 
 > GitHub Actions schedules are approximate and can be delayed by minutes; the
 > cron time is always interpreted in UTC.
 
 ## Error handling
 
-- **Network failures** — every outbound request uses timeouts and retries with
-  backoff; one failing source never crashes the whole run.
+- **Network failures** — every outbound request uses a timeout (longer for slow
+  `*.gov.in` hosts) and `tenacity` retries with exponential backoff; one failing
+  source (or one URL in a multi-URL source) never crashes the whole run.
+- **Redundant re-fetches** — RSS and HTML scrapers send conditional GET headers
+  (ETag/Last-Modified cached in `cache/`) and skip unchanged content on `304`.
+- **Duplicate items** — a persisted `(title, url)` hash store skips already-seen
+  items before DeepSeek, and hashes are only marked "seen" after a successful
+  Sheets write so a failed run retries.
 - **Empty/invalid feeds** — logged and skipped.
 - **DeepSeek failure** — falls back to a titles-and-links-only digest grouped by
   each source's category hint.

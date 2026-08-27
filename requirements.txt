@@ -1,5 +1,7 @@
 # HTTP client (scraping + Telegram API)
 httpx
+# Retries with exponential backoff
+tenacity
 # RSS/Atom parsing
 feedparser
 # HTML scraping

@@ -18,9 +18,10 @@ from typing import Dict, List, Set
 
 from dotenv import load_dotenv
 
+from dedup import SeenStore, item_hash
 from models import ALLOWED_CATEGORIES, Article
 from notifier import telegram_bot
-from scrapers import feed_parser, web_scraper
+from scrapers import feed_parser, nasa_scraper, web_scraper
 from storage.sheets_client import SheetsClient
 from summarizer.ai_engine import AIEngine
 
@@ -234,11 +235,14 @@ def normalize_source(source: dict) -> dict:
 
 
 def scrape_source(source: dict) -> List[Article]:
-    if source.get("type") == "rss":
+    source_type = source.get("type")
+    if source_type == "rss":
         return feed_parser.fetch_articles(source)
-    if source.get("type") == "web":
+    if source_type == "api":
+        return nasa_scraper.fetch_articles(source)
+    if source_type in ("web", "html_list", "html_multi"):
         return web_scraper.fetch_articles(source)
-    logger.warning("Unknown source type '%s'; skipping.", source.get("type"))
+    logger.warning("Unknown source type '%s'; skipping.", source_type)
     return []
 
 
@@ -294,12 +298,18 @@ def main() -> None:
     scraped = [a for a in scraped if _is_relevant(a)]
     logger.info("Topic pre-filter kept %d of %d scraped article(s).", len(scraped), before)
 
-    # 4. URL dedup (against the sheet and within this run), then intra-batch
-    #    title-similarity dedup per source.
+    # 4. Dedup: drop URLs already logged to the sheet or seen this run, plus any
+    #    item whose (title, url) hash was already processed in a prior run, then
+    #    collapse near-duplicate titles per source. Only genuinely new items reach
+    #    DeepSeek.
+    seen_store = SeenStore()
+    seen_hashes = seen_store.load()
     fresh: List[Article] = []
     seen: Set[str] = set()
     for article in scraped:
         if article.url in existing_urls or article.url in seen:
+            continue
+        if item_hash(article.title, article.url) in seen_hashes:
             continue
         seen.add(article.url)
         fresh.append(article)
@@ -338,11 +348,12 @@ def main() -> None:
         _notify_no_new_content(telegram_token, telegram_chat_id)
         return
 
-    # 7. Cache the digest text, then log the delivered fresh articles.
+    # 7. Cache the digest text, then log the delivered fresh articles and mark
+    #    them "seen" only after the Sheet write succeeds, so a failed run retries.
+    delivered_fresh = [a for a in fresh if a.url in delivered_urls]
     save_digest(telegram_bot.format_digest(digest))
-    sheets.append_articles(
-        [a for a in fresh if a.url in delivered_urls], sent=False
-    )
+    sheets.append_articles(delivered_fresh, sent=False)
+    seen_store.add([item_hash(a.title, a.url) for a in delivered_fresh])
 
     # 8. Post to Telegram: the primary channel plus every subscriber. Per-chat
     #    failures are isolated so one blocked user never aborts the whole run.

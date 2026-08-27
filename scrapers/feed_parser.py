@@ -1,7 +1,10 @@
 """RSS/Atom ingestion using ``feedparser``.
 
-The feed is fetched with ``httpx`` (for timeouts and retries) and then handed
-to ``feedparser`` for parsing, which tolerates both RSS and Atom formats.
+Feeds are fetched over HTTP with conditional GET (ETag / Last-Modified persisted
+in ``cache/feed_state.json``) so an unchanged feed short-circuits to an empty
+result without re-parsing. The network call is isolated in a narrowed
+``except httpx.HTTPError`` block with a direct ``feedparser.parse(url)`` fallback,
+so unrelated parsing bugs are never swallowed.
 """
 
 from __future__ import annotations
@@ -11,13 +14,16 @@ import re
 from typing import List
 
 import feedparser
+import httpx
 
+from cache_store import CacheStore
 from models import Article
 from scrapers.http_utils import fetch_url
 
 logger = logging.getLogger(__name__)
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+FEED_STATE_PATH = "cache/feed_state.json"
 
 
 def _strip_html(text: str) -> str:
@@ -32,8 +38,41 @@ def fetch_articles(source: dict) -> List[Article]:
     name = source.get("name") or source.get("id") or url
     category = source.get("category", "aerospace")
 
-    response = fetch_url(url)
-    feed = feedparser.parse(response.content)
+    store = CacheStore(FEED_STATE_PATH)
+    state = store.get(url, {}) or {}
+    conditional_headers = {}
+    if state.get("etag"):
+        conditional_headers["If-None-Match"] = state["etag"]
+    if state.get("modified"):
+        conditional_headers["If-Modified-Since"] = state["modified"]
+
+    # Only the network fetch is wrapped here; parsing stays outside the try so
+    # a bug in the logic below can never be misreported as a feed failure.
+    try:
+        response = fetch_url(
+            url, headers=conditional_headers, allow_not_modified=True
+        )
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "Feed %s fetch failed (%s); falling back to direct feedparser.parse.",
+            url, exc,
+        )
+        feed = feedparser.parse(url)
+    else:
+        if response.status_code == 304:
+            logger.info("Feed %s unchanged (304); skipping.", url)
+            return []
+
+        # Persist the new validators for the next run's conditional GET.
+        new_state = {}
+        if response.headers.get("etag"):
+            new_state["etag"] = response.headers["etag"]
+        if response.headers.get("last-modified"):
+            new_state["modified"] = response.headers["last-modified"]
+        if new_state:
+            store.set(url, new_state)
+
+        feed = feedparser.parse(response.content)
 
     # feedparser reports malformed feeds via the "bozo" flag; log and continue.
     if getattr(feed, "bozo", False):

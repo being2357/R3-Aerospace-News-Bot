@@ -3,26 +3,18 @@
     {
       "id": "nasa_internships",
       "name": "NASA Internships & Careers",
-      "type": "html_list",
-      "parser": "generic_link_list",
-      "url": "https://www.nasa.gov/learning-resources/internship-programs/",
-      "category": "internships",
-      "selectors": {
-        "item": "a[href]",
-        "title": "h3"
-      }
+      "type": "api",
+      "parser": "nasa_wp",
+      "query": ["internship", "fellowship"],
+      "category": "internships"
     },
     {
       "id": "nasa_stem_gateway",
       "name": "NASA STEM Gateway",
-      "type": "html_list",
-      "parser": "generic_link_list",
-      "url": "https://www.nasa.gov/learning-resources/",
-      "category": "internships",
-      "selectors": {
-        "item": "a[href]",
-        "title": "h2"
-      }
+      "type": "api",
+      "parser": "nasa_wp",
+      "query": ["student opportunity", "challenge", "stem"],
+      "category": "internships"
     },
     {
       "id": "esa_academy",

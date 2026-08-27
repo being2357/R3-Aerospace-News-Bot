@@ -36,27 +36,32 @@ files back to the repository.
 ## System architecture
 
 ```
-config/sources.json ──► scrapers/feed_parser.py   ─┐
-                        scrapers/web_scraper.py     ├─► main.py ─► summarizer/ai_engine.py
-                        scrapers/http_utils.py      │      │                 │
-                                                   │      │                 ▼
-                        storage/sheets_client.py ◄──┴── latest_digest.txt ─ notifier/telegram_bot.py
-                                                                                 ▲
-                                                   data/subscribers.json ────────┘
+config/sources.json ──► scrapers/feed_parser.py   (RSS/Atom)
+                        scrapers/web_scraper.py    (HTML, async)
+                        scrapers/nasa_scraper.py   (JSON API)
+                        scrapers/http_utils.py     (shared httpx + tenacity)
+                        cache_store.py  dedup.py   (etag + seen state)
+
+main.py ─► summarizer/ai_engine.py (DeepSeek) ─► storage/sheets_client.py
+       └─► notifier/telegram_bot.py ◄── latest_digest.txt, data/subscribers.json
 ```
 
 | Path | Purpose |
 |---|---|
-| `config/sources.json` | Source registry (RSS + web targets, category hint) |
-| `scrapers/feed_parser.py` | RSS/Atom ingestion |
-| `scrapers/web_scraper.py` | HTML fallback scraper |
-| `scrapers/http_utils.py` | Shared fetch with timeout/retry/User-Agent |
+| `config/sources.json` | Source registry (RSS, HTML, JSON API targets; category hint) |
+| `scrapers/feed_parser.py` | RSS/Atom ingestion with conditional GET (ETag/Last-Modified) |
+| `scrapers/web_scraper.py` | Concurrent HTML fallback scraper (`httpx.AsyncClient` + `asyncio.gather`) |
+| `scrapers/nasa_scraper.py` | NASA JSON ingestion via the WordPress REST API |
+| `scrapers/http_utils.py` | Shared fetch: User-Agent, timeouts, tenacity retries, conditional GET |
+| `cache_store.py` | JSON-file key/value store for cross-run state (`cache/`) |
+| `dedup.py` | `item_hash` + persisted "seen" store (dedup before DeepSeek) |
 | `storage/sheets_client.py` | Google Sheets auth + URL dedup + sent-flag logging |
 | `summarizer/ai_engine.py` | DeepSeek classification + summarization |
 | `notifier/telegram_bot.py` | Telegram HTML delivery + command bot + subscriber onboarding/persistence |
 | `main.py` | Orchestrator + topic filter + dedup + digest cache + multi-recipient send |
 | `data/subscribers.json` | Persisted subscriber chat IDs (added on `/start`, pruned on block) |
 | `latest_digest.txt` | Cached digest text served by `/latest` and `/start` |
+| `cache/` | Persisted ETag/Last-Modified + seen-hash state (committed + actions/cache) |
 | `.github/workflows/daily_digest.yml` | Daily cron + state-file auto-commit |
 | `models.py` | Shared `Article` dataclass + category/section constants |
 
@@ -71,11 +76,15 @@ config/sources.json ──► scrapers/feed_parser.py   ─┐
 1. **Load config** — read `config/sources.json`, normalize each source's category.
 2. **Authenticate Sheets** — decode `GCP_SERVICE_ACCOUNT_KEY`, open the sheet,
    ensure the header row, and load existing URLs for dedup.
-3. **Scrape** — fetch every source (RSS or web), isolating per-source failures.
+3. **Scrape** — fetch every source (RSS, JSON API, or HTML). HTML sources fetch
+   concurrently (`asyncio.gather`), and a multi-URL source's pages are gathered in
+   parallel; failures are isolated per source (and per URL).
 4. **Topic pre-filter** — keep only opportunity/competition/event items via
    include/exclude keyword and phrase lists.
-5. **Dedupe** — drop URLs already in the sheet or seen this run, then collapse
-   near-duplicate titles per source.
+5. **Dedupe** — drop URLs already in the sheet or seen this run, drop any item
+   whose `(title, url)` hash is already in the persisted "seen" store, then
+   collapse near-duplicate titles per source. Only genuinely new items reach
+   DeepSeek; hashes are marked "seen" only after a successful Sheets write.
 6. **Retry queue** — re-include articles previously logged but never sent.
 7. **Classify + summarize** — DeepSeek strictly assigns each article to one of
    three sections and discards the rest.
@@ -198,12 +207,16 @@ After the loop:
 1. **Checkout** — `actions/checkout@v4`.
 2. **Set up Python** — `actions/setup-python@v5`, Python 3.11.
 3. **Install dependencies** — `pip install -r requirements.txt`.
-4. **Run daily digest** — `python main.py` with secrets in the environment.
-5. **Commit and push state files** — stages `latest_digest.txt` and
-   `data/subscribers.json`, commits as `github-actions[bot]`, and pushes:
+4. **Restore scraper cache** — `actions/cache@v4` restores `cache/` (keyed
+   `aero-cache-${{ github.run_id }}`, prefix `aero-cache-`) so ETag/Last-Modified
+   and seen-hash state carry over between runs; a new entry is saved on success.
+5. **Run daily digest** — `python main.py` with secrets in the environment.
+6. **Commit and push state files** — stages `latest_digest.txt`,
+   `data/subscribers.json`, and `cache/`, commits as `github-actions[bot]`, and
+   pushes:
 
    ```bash
-   git add latest_digest.txt data/subscribers.json
+   git add latest_digest.txt data/subscribers.json cache/
    if git diff --cached --quiet; then
      echo 'No state changes to commit.'
    else
