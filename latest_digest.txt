@@ -1,33 +1,5 @@
-<b>🛰️ Aerospace Opportunities Digest — 2026-08-27</b>
+<b>🛰️ Aerospace Opportunities Digest — 2026-08-28</b>
 
 <b>🎓 Internships &amp; Student Opportunities</b>
-• <a href="https://www.nasa.gov/learning-resources/launch-into-a-new-school-year-with-nasa/">Launch Into a New School Year With NASA</a>
-  <i>NASA's back-to-school page highlights a range of student engagement opportunities in STEM fields. It encourages students to explore hands-on projects and programs that connect them with the agency's missions.</i>
-• <a href="https://www.nasa.gov/learning-resources/ways-community-college-students-can-get-involved-with-nasa/">Ways Community College Students Can Get Involved With NASA</a>
-  <i>This article outlines NASA opportunities specifically for community college students, including internships and research experiences. It emphasizes pathways for two-year college students to join the STEM workforce.</i>
-• <a href="https://www.nasa.gov/science-research/earth-science/sarp-2025-closeout/">SARP 2025 Closeout</a>
-  <i>NASA's Student Airborne Research Program (SARP) concluded its 2025 summer internship with 47 undergraduates presenting their research. The program operates in two cohorts, with SARP West hosted at the Guardian Jet Center and University of California.</i>
-• <a href="https://www.nasa.gov/learning-resources/nasa-invests-in-future-stem-workforce-through-space-grant-awards/">NASA Invests in Future STEM Workforce Through Space Grant Awards</a>
-  <i>NASA is awarding up to $870,000 annually to 52 institutions over four years through the Space Grant program. These awards support workforce development, STEM education, and aerospace collaboration for the next generation.</i>
-• <a href="https://www.nasa.gov/aeronautics/nasa-selects-university-teams-to-help-advance-aviation-research/">NASA Selects University Teams to Help Advance Aviation Research</a>
-  <i>NASA selected four university teams through its University Leadership Initiative to advance aviation research. Projects include high-supersonic propulsion systems and low-noise urban air mobility routes, offering students real-world flight research experience.</i>
-• <a href="https://www.nasa.gov/learning-resources/stem-engagement-at-nasa/murep/nasa-award-boosts-space-technology-research-capabilities/">NASA Award Boosts Space Technology Research Capabilities</a>
-  <i>NASA's M-STAR funding opportunity opened for applications, supporting space technology research at minority-serving institutions. The application window closes on August 11 at 11:59 p.m. EDT.</i>
-• <a href="https://www.nasa.gov/centers-and-facilities/langley/nasas-career-technical-education-day-highlights-technical-careers/">NASA’s Career Technical Education Day Highlights Technical Careers</a>
-  <i>NASA's Office of STEM Engagement hosted a Career Technical Education Day to highlight technical careers. The event aimed to cultivate the next generation of technicians in engineering, fabrication, and electronics fields.</i>
-• <a href="https://www.nasa.gov/learning-resources/space-out-this-summer-with-variety-of-nasa-stem-activities/">Space Out This Summer with Variety of NASA STEM Activities</a>
-  <i>NASA offers a variety of summer STEM activities for students to explore and create. These opportunities range from creative projects to outdoor and future-career-focused experiences.</i>
-• <a href="https://www.iist.ac.in/numerical-approximations-fluid-flow-problems-hybrid-higher-order-methods">Applications are invited for Research Associate / Post-Doctoral Fellowship (PDF) position at IIST, funded by the ANRF under the research project "Numerical Approximations of Fluid Flow Problems by Hybrid Higher Order Methods".</a>
-  <i>IIST invites applications for a Research Associate or Post-Doctoral Fellowship position funded by ANRF. The project focuses on numerical approximations of fluid flow problems using hybrid higher order methods.</i>
-
-<b>🏆 Competitions &amp; Hackathons</b>
-• <a href="https://www.nasa.gov/directorates/stmd/prizes-challenges-crowdsourcing-program/nasa-techleap-prize-orbital-clarity-challenge/">NASA TechLeap Prize: Orbital Clarity Challenge</a>
-  <i>The NASA TechLeap Prize's Orbital Clarity Challenge is now open, focusing on space weather and orbital drag. It is a collaborative effort between NASA's Heliophysics Division, Flight Opportunities program, and Center of Excellence for Collaborative Innovation.</i>
-• <a href="https://www.nasa.gov/centers-and-facilities/kennedy/nasas-2026-lunabotics-winning-student-teams-engineering-lunar-future/">NASA’s 2026 Lunabotics: Winning Student Teams Engineering Lunar Future</a>
-  <i>NASA's 2026 Lunabotics Challenge has concluded, with winning student teams recognized for engineering lunar robotics. The competition emphasizes resilient, efficient, and autonomous systems for lunar exploration.</i>
-
-<b>📅 Conferences &amp; Upcoming Events</b>
-• <a href="https://www.nasa.gov/missions/moon-base/building-the-moon-base-nasa-stories-at-the-ion/">Building the Moon Base: NASA Stories at the Ion</a>
-  <i>NASA Stories at the Ion on July 30 featured a presentation on building the Moon Base at the lunar South Pole. Shatel Bhakta discussed challenges and opportunities for sustained human presence on the Moon.</i>
-• <a href="https://www.iist.ac.in/news/royal-economic-society-res-2026-annual-conference-university-newcastle-uk">Royal Economic Society (RES) 2026 Annual Conference, University of Newcastle, UK.</a>
-  <i>The Royal Economic Society's 2026 Annual Conference will be held at the University of Newcastle, UK. This event is a professional conference for economists, not specifically aerospace-focused.</i>
+• <a href="https://www.nasa.gov/learning-resources/3-ways-students-can-get-involved-with-artemis/">3 Ways Students Can Get Involved With Artemis</a>
+  <i>NASA's Artemis program offers students multiple ways to get involved in lunar exploration and Mars mission development. The article highlights opportunities for students to contribute to this new era of space exploration through NASA and its partners.</i>
