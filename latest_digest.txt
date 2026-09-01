@@ -1,5 +1,11 @@
-<b>🛰️ Aerospace Opportunities Digest — 2026-08-31</b>
+<b>🛰️ Aerospace Opportunities Digest — 2026-09-01</b>
 
-<b>🏆 Competitions &amp; Hackathons</b>
-• <a href="https://www.nasa.gov/directorates/stmd/prizes-challenges-crowdsourcing-program/centennial-challenges/nasa-awards-first-prize-in-phase-2-of-agencys-lunarecycle-challenge/">NASA Awards First Prize in Phase 2 of Agency&amp;#8217;s LunaRecycle Challenge</a>
-  <i>NASA awarded first prize in Phase 2 of its LunaRecycle Challenge to an MIT student team for developing a technology that recycles waste materials like fabrics, plastics, foam, and metals into fine powder. The team, composed of undergraduate, graduate, and doctoral students, received a total of $775,000 in awards.</i>
+<b>🎓 Internships &amp; Student Opportunities</b>
+• <a href="https://www.nasa.gov/aeronautics/armd-solicitations/">ARMD Research Solicitations (Updated June 23)</a>
+  <i>NASA's Aeronautics Research Mission Directorate maintains a page compiling solicitations for opportunities to collaborate on aeronautics research. The page was updated on June 23, 2026, and directs users to the NASA Solicitation and Proposal Integrated system for official announcements.</i>
+• <a href="https://cf23.xcddev.com/aas/abstract/index.cfm?ID=BrCGmga">Register for the 2026-27 CanSat Competition</a>
+  <i>Registration is open for the 2026-27 CanSat Competition, a student challenge to build and launch a soda-can-sized satellite. The competition provides hands-on experience in aerospace engineering and project management.</i>
+
+<b>📅 Conferences &amp; Upcoming Events</b>
+• <a href="https://www.iist.ac.in/events/two-day-workshop-atmospheric-and-space-sciences-observation-and-modelling-asom-2026">Two-Day Workshop on Atmospheric and Space Sciences Observation and Modelling (ASOM 2026)</a>
+  <i>A two-day workshop on Atmospheric and Space Sciences Observation and Modelling (ASOM 2026) is announced. The event focuses on observation and modeling techniques in atmospheric and space sciences.</i>
