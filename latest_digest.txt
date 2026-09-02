@@ -1,11 +1,5 @@
-<b>🛰️ Aerospace Opportunities Digest — 2026-09-01</b>
+<b>🛰️ Aerospace Opportunities Digest — 2026-09-02</b>
 
 <b>🎓 Internships &amp; Student Opportunities</b>
-• <a href="https://www.nasa.gov/aeronautics/armd-solicitations/">ARMD Research Solicitations (Updated June 23)</a>
-  <i>NASA's Aeronautics Research Mission Directorate maintains a page compiling solicitations for opportunities to collaborate on aeronautics research. The page was updated on June 23, 2026, and directs users to the NASA Solicitation and Proposal Integrated system for official announcements.</i>
-• <a href="https://cf23.xcddev.com/aas/abstract/index.cfm?ID=BrCGmga">Register for the 2026-27 CanSat Competition</a>
-  <i>Registration is open for the 2026-27 CanSat Competition, a student challenge to build and launch a soda-can-sized satellite. The competition provides hands-on experience in aerospace engineering and project management.</i>
-
-<b>📅 Conferences &amp; Upcoming Events</b>
-• <a href="https://www.iist.ac.in/events/two-day-workshop-atmospheric-and-space-sciences-observation-and-modelling-asom-2026">Two-Day Workshop on Atmospheric and Space Sciences Observation and Modelling (ASOM 2026)</a>
-  <i>A two-day workshop on Atmospheric and Space Sciences Observation and Modelling (ASOM 2026) is announced. The event focuses on observation and modeling techniques in atmospheric and space sciences.</i>
+• <a href="https://www.nasa.gov/learning-resources/linking-community-college-studies-to-aerospace-careers/">NASA Revamps Challenge Linking Community College Studies to Aerospace Careers</a>
+  <i>The updated NASA Community College Aerospace Scholars (NCAS) student challenge invites community college students to explore aerospace careers. Participants learn about NASA missions, engage with experts, and discover pathways to roles in science and engineering.</i>
