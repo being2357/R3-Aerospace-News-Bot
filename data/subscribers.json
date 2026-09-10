@@ -33,6 +33,13 @@
       "first_name": "Anna",
       "last_name": "Thomas",
       "chat_type": "private"
+    },
+    {
+      "chat_id": "8283226026",
+      "subscribed_at": "2026-09-10T20:12:48+00:00",
+      "first_name": "Deva",
+      "last_name": "Pragadesh",
+      "chat_type": "private"
     }
   ]
 }
