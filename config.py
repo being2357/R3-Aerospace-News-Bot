@@ -1,0 +1,183 @@
+"""Internal scraping-source configuration.
+
+This module replaces the former ``config/sources.json`` file. Keeping the source
+registry as a Python literal removes a runtime file dependency (no JSON load
+step) while preserving the exact same shape the scrapers consume. Each entry
+carries a ``type`` that selects the scraper in ``main.scrape_source``:
+
+    * ``rss``         -> ``scrapers/feed_parser.py``
+    * ``api``         -> ``scrapers/nasa_scraper.py`` (NASA WordPress REST)
+    * ``html_list``   -> ``scrapers/web_scraper.py`` (single page)
+    * ``html_multi``  -> ``scrapers/web_scraper.py`` (many pages, concurrent)
+    * ``web``         -> legacy alias for a single HTML page
+
+``category`` is only a *hint* (``internships``, ``competitions``, or
+``conferences``); the DeepSeek classifier re-assigns every article.
+"""
+
+SOURCES: list = [
+    {
+        "id": "nasa_internships",
+        "name": "NASA Internships & Careers",
+        "type": "api",
+        "parser": "nasa_wp",
+        "query": ["internship", "fellowship"],
+        "category": "internships",
+    },
+    {
+        "id": "nasa_stem_gateway",
+        "name": "NASA STEM Gateway",
+        "type": "api",
+        "parser": "nasa_wp",
+        "query": ["student opportunity", "challenge", "stem"],
+        "category": "internships",
+    },
+    {
+        "id": "esa_academy",
+        "name": "ESA Academy (Student Opportunities)",
+        "type": "html_list",
+        "parser": "generic_link_list",
+        "url": "https://www.esa.int/Education/ESA_Academy",
+        "category": "internships",
+        "selectors": {"item": "a[href]", "title": "h2"},
+    },
+    {
+        "id": "esa_cansat",
+        "name": "ESA CanSat",
+        "type": "html_list",
+        "parser": "generic_link_list",
+        "url": "https://www.esa.int/Education/CanSat",
+        "category": "competitions",
+        "selectors": {"item": "a[href]", "title": "h2"},
+    },
+    {
+        "id": "american_cansat",
+        "name": "American CanSat Competition",
+        "type": "html_list",
+        "parser": "generic_link_list",
+        "url": "https://www.cansatcompetition.com/",
+        "category": "competitions",
+        "selectors": {"item": "a[href]", "title": "h2"},
+    },
+    {
+        "id": "nasa_space_apps",
+        "name": "NASA Space Apps Challenge",
+        "type": "html_list",
+        "parser": "generic_link_list",
+        "url": "https://www.spaceappschallenge.org/",
+        "category": "competitions",
+        "selectors": {"item": "a[href]", "title": "h2"},
+    },
+    {
+        "id": "aiaa_student_conferences",
+        "name": "AIAA Student Conferences",
+        "type": "html_list",
+        "parser": "generic_link_list",
+        "url": "https://www.aiaa.org/events-learning/events/student-conferences",
+        "category": "conferences",
+        "selectors": {"item": "a[href*='event']", "title": "h2"},
+    },
+    {
+        "id": "esa_rss",
+        "name": "ESA News (opportunities catch-all)",
+        "type": "rss",
+        "parser": "rss_generic",
+        "url": "https://www.esa.int/rssfeed",
+        "category": "internships",
+    },
+    {
+        "id": "isro_internship_index",
+        "name": "ISRO/DoS Internship & Student Project Trainee Schemes (master index)",
+        "type": "html_list",
+        "parser": "isro_index",
+        "url": "https://www.isro.gov.in/InternshipAndProjects.html",
+        "category": "internships",
+        "notes": (
+            "Links out to each ISRO centre's own internship page (see "
+            "isro_centres below). Re-scrape this periodically to catch "
+            "new/changed centre links, not just the centre pages directly."
+        ),
+        "selectors": {"item": "a[href]", "title": "a"},
+    },
+    {
+        "id": "isro_centres",
+        "name": "ISRO Centre Internship Pages",
+        "type": "html_multi",
+        "parser": "isro_centre_page",
+        "category": "internships",
+        "urls": [
+            "https://www.ursc.gov.in/hrd/students.jsp",
+            "https://www.sac.gov.in/srtd",
+            "https://www.mcf.gov.in/website/Internship",
+            "https://vsscinternship.vssc.gov.in/HRDDPROJ/",
+            "https://www.iirs.gov.in/content/external-student-internship",
+            "https://www.lpsc.gov.in/Internship.html",
+            "https://www.nrsc.gov.in/nrscnew/Training_Student_Eligibility.php",
+            "https://www.iprc.gov.in/careers.html",
+            "https://www.shar.gov.in/sdscshar/internship.jsp",
+            "https://www.istrac.gov.in/Student_Internship.html",
+        ],
+        "notes": (
+            "Structurally inconsistent government sites - treat as best-effort "
+            "text extraction, feed raw page text to DeepSeek rather than relying "
+            "on fixed selectors per centre."
+        ),
+    },
+    {
+        "id": "isro_sac_careers",
+        "name": "ISRO SAC Careers (jobs, not just internships)",
+        "type": "html_list",
+        "parser": "generic_link_list",
+        "url": "https://www.sac.gov.in/careers/?lang=en",
+        "category": "jobs",
+        "selectors": {"item": "a[href]", "title": "a"},
+    },
+    {
+        "id": "drdo_vacancies_archive",
+        "name": "DRDO Vacancies Archive (JRF, apprenticeship, internships, jobs)",
+        "type": "html_list",
+        "parser": "drdo_vacancies",
+        "url": "https://drdo.gov.in/drdo/en/offerings/vacancies/archive",
+        "category": "competitions",
+        "notes": (
+            "Primary DRDO source - RAC (rac.gov.in) explicitly does not handle "
+            "JRF/apprenticeship/internship queries, only Scientist-B lateral "
+            "recruitment. This archive page is the correct index for "
+            "student-relevant postings."
+        ),
+        "selectors": {"item": "div.views-row", "title": "a", "link": "a"},
+    },
+    {
+        "id": "rac_drdo_scientist",
+        "name": "RAC DRDO Scientist Recruitment",
+        "type": "html_list",
+        "parser": "generic_link_list",
+        "url": "https://rac.gov.in/",
+        "category": "jobs",
+        "notes": "Scientist-B and lateral recruitment only, not internships.",
+        "selectors": {"item": "a[href]", "title": "a"},
+    },
+    {
+        "id": "pib_defence",
+        "name": "PIB Defence News (ISRO & DRDO Releases)",
+        "type": "rss",
+        "parser": "rss_generic",
+        "url": "https://pib.gov.in/RssFeed.aspx?ModId=1&Lang=1",
+        "category": "aerospace",
+    },
+    {
+        "id": "iist_internships",
+        "name": "IIST Internships",
+        "type": "html_list",
+        "parser": "generic_link_list",
+        "url": "https://www.iist.ac.in/",
+        "category": "internships",
+        "notes": (
+            "Original 'summer-internship' path returned no confirmed content "
+            "during review - re-verify the exact path on iist.ac.in before "
+            "relying on it; start from the homepage and locate the current "
+            "internship/academics link."
+        ),
+        "selectors": {"item": "a[href]", "title": "a"},
+    },
+]

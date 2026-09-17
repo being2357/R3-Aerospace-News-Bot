@@ -1,7 +1,7 @@
 """HTML scraping fallback for sources without an RSS/Atom or JSON API.
 
-Only sites with no public JSON endpoint remain here (see ``config/sources.json``
-notes): ESA education pages, Space Apps, AIAA, CanSatCompetition, IIST, and the
+Only sites with no public JSON endpoint remain here (see ``config.py`` notes):
+ESA education pages, Space Apps, AIAA, CanSatCompetition, IIST, and the
 static Indian government sites (ISRO centres, SAC, DRDO, RAC). NASA was migrated
 to ``scrapers/nasa_scraper.py`` (WordPress REST API).
 

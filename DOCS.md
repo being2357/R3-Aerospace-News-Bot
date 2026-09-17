@@ -9,7 +9,7 @@ GitHub Actions CI auto-commits state, and how to troubleshoot common failures.
 1. [Overview](#overview)
 2. [System architecture](#system-architecture)
 3. [Daily pipeline flow](#daily-pipeline-flow)
-4. [Subscriber handling (`data/subscribers.json`)](#subscriber-handling-datasubscribersjson)
+4. [Subscriber handling (Google Sheet CSV)](#subscriber-handling-google-sheet-csv)
 5. [Multi-recipient dispatch (`main.py`)](#multi-recipient-dispatch-mainpy)
 6. [GitHub Actions CI workflow](#github-actions-ci-workflow)
 7. [Environment variables](#environment-variables)
@@ -36,19 +36,19 @@ files back to the repository.
 ## System architecture
 
 ```
-config/sources.json ──► scrapers/feed_parser.py   (RSS/Atom)
-                        scrapers/web_scraper.py    (HTML, async)
-                        scrapers/nasa_scraper.py   (JSON API)
-                        scrapers/http_utils.py     (shared httpx + tenacity)
-                        cache_store.py  dedup.py   (etag + seen state)
+config.py ──► scrapers/feed_parser.py   (RSS/Atom)
+              scrapers/web_scraper.py    (HTML, async)
+              scrapers/nasa_scraper.py   (JSON API)
+              scrapers/http_utils.py     (shared httpx + tenacity)
+              cache_store.py  dedup.py   (etag + seen state)
 
 main.py ─► summarizer/ai_engine.py (DeepSeek) ─► storage/sheets_client.py
-       └─► notifier/telegram_bot.py ◄── latest_digest.txt, data/subscribers.json
+       └─► notifier/telegram_bot.py ◄── latest_digest.txt, GOOGLE_SHEET_CSV_URL
 ```
 
 | Path | Purpose |
 |---|---|
-| `config/sources.json` | Source registry (RSS, HTML, JSON API targets; category hint) |
+| `config.py` | Internal source registry (RSS, HTML, JSON API targets; category hint) |
 | `scrapers/feed_parser.py` | RSS/Atom ingestion with conditional GET (ETag/Last-Modified) |
 | `scrapers/web_scraper.py` | Concurrent HTML fallback scraper (`httpx.AsyncClient` + `asyncio.gather`) |
 | `scrapers/nasa_scraper.py` | NASA JSON ingestion via the WordPress REST API |
@@ -59,7 +59,7 @@ main.py ─► summarizer/ai_engine.py (DeepSeek) ─► storage/sheets_client.p
 | `summarizer/ai_engine.py` | DeepSeek classification + summarization |
 | `notifier/telegram_bot.py` | Telegram HTML delivery + command bot + subscriber onboarding/persistence |
 | `main.py` | Orchestrator + topic filter + dedup + digest cache + multi-recipient send |
-| `data/subscribers.json` | Persisted subscriber chat IDs (added on `/start`, pruned on block) |
+| `data/subscribers.json` | Command-bot subscriber chat IDs (added on `/start`, pruned on block) |
 | `latest_digest.txt` | Cached digest text served by `/latest` and `/start` |
 | `cache/` | Persisted ETag/Last-Modified + seen-hash state (committed + actions/cache) |
 | `.github/workflows/daily_digest.yml` | Daily cron + state-file auto-commit |
@@ -73,7 +73,8 @@ main.py ─► summarizer/ai_engine.py (DeepSeek) ─► storage/sheets_client.p
    that subscribes any chat that sent `/start` or added the bot to a group since
    the last run, sends each a confirmation, and advances the offset to clear
    Telegram's update queue.
-1. **Load config** — read `config/sources.json`, normalize each source's category.
+1. **Load config** — read the `SOURCES` list from `config.py`, normalize each
+   source's category.
 2. **Authenticate Sheets** — decode `GCP_SERVICE_ACCOUNT_KEY`, open the sheet,
    ensure the header row, and load existing URLs for dedup.
 3. **Scrape** — fetch every source (RSS, JSON API, or HTML). HTML sources fetch
@@ -90,87 +91,80 @@ main.py ─► summarizer/ai_engine.py (DeepSeek) ─► storage/sheets_client.p
    three sections and discards the rest.
 8. **Cache + log** — write `latest_digest.txt`, append fresh articles to Sheets
    as "unsent".
-9. **Broadcast** — send the digest to every subscriber plus the primary chat
-   (see [Multi-recipient dispatch](#multi-recipient-dispatch-mainpy)).
+9. **Broadcast** — send the digest to every subscriber from the published Sheet
+   CSV plus the primary chat (see
+   [Multi-recipient dispatch](#multi-recipient-dispatch-mainpy)).
 10. **Mark sent** — flag delivered articles in Sheets so they are not retried.
 
 If no new opportunities survive filtering, the pipeline writes a "no
 opportunities" cache, then broadcasts a friendly "caught up" notice to every
 subscriber plus the primary chat, and exits successfully.
 
-## Subscriber handling (`data/subscribers.json`)
+## Subscriber handling (Google Sheet CSV)
 
-Subscribers are the chats that receive every daily digest. They live in a
-tracked JSON file so the CI run (and any bot host that pulls) share one list.
+The chats that receive every daily digest come from a published Google Sheet,
+read as a CSV on each run. `TELEGRAM_CHAT_ID` is always appended as a fallback
+primary recipient.
 
-### File format
+### Source of truth
 
-```json
-{
-  "subscribers": [
-    {
-      "chat_id": "123456789",
-      "subscribed_at": "2026-08-24T12:00:00+00:00",
-      "username": "jane_doe",
-      "first_name": "Jane",
-      "last_name": "Doe",
-      "chat_type": "private"
-    }
-  ]
-}
+`main.py` resolves broadcast recipients via
+`telegram_bot.fetch_subscribers_from_csv(GOOGLE_SHEET_CSV_URL)`, which:
+
+1. Downloads the published CSV over HTTP (`urllib.request`, 30s timeout).
+2. Parses it with the standard `csv` module.
+3. Reads the `chat_id` column (matched by name, so it may appear anywhere).
+4. Strips quotes, apostrophes, and surrounding whitespace from each value.
+5. Returns the distinct chat IDs, in order, deduplicated.
+
+Any failure — blank URL, network error, non-CSV body, or missing column — returns
+an empty list, so the broadcast falls back to `TELEGRAM_CHAT_ID`.
+
+### Sheet format
+
+The subscriber Sheet needs a header row with a `chat_id` column:
+
+```
+chat_id,note
+5636898169,Alice
+-1001234567890,Announcements channel
 ```
 
-- `chat_id` — the Telegram chat ID as a string.
-- `subscribed_at` — UTC ISO-8601 timestamp of first `/start` (informational).
-- Optional metadata captured on signup: `username`, `first_name`, `last_name`,
-  `chat_type` (`private`/`group`/`supergroup`), and `title` (for group chats).
-
-An empty file is `{"subscribers": []}`.
-
-### Lifecycle
-
-- **Add** — two paths subscribe a chat:
-  - The command bot's `handle_update` calls `add_subscriber(chat_id)` on `/start`
-    and replies with a confirmation plus the latest digest.
-  - The daily pipeline's startup pass `catch_up_subscribers` onboards any pending
-    `/start` or group-join (`new_chat_members`) updates before scraping, so a
-    subscriber who signed up after the last run still gets that day's digest.
-  `add_subscriber` dedupes by `chat_id`, records `subscribed_at` (plus optional
-  user metadata) on first sight, and returns `True` only when newly added.
-- **Read** — `main.py` calls `get_subscribed_chat_ids()` to build the recipient
-  list for each broadcast.
-- **Prune** — if a send to a subscriber fails with Telegram `403` (the user
-  blocked the bot), the digest removes that `chat_id` from the file so it is not
-  retried forever. The CI workflow then commits the removal.
+Group and channel IDs are negative. Publish the sheet to the web as CSV
+(**File → Share → Publish to web → Comma-separated values**) and set
+`GOOGLE_SHEET_CSV_URL` to the resulting URL.
 
 ### Helper API (in `notifier/telegram_bot.py`)
 
 | Function | Purpose |
 |---|---|
-| `load_subscribers(path=...)` | Return subscriber records (empty list if missing/corrupt) |
-| `save_subscribers(records, path=...)` | Atomic write via `.tmp` + `os.replace` |
-| `get_subscribed_chat_ids(path=...)` | Distinct chat IDs as strings |
-| `add_subscriber(chat_id, metadata=None, path=...)` | Add if new (with optional user metadata); return `True` when added |
-| `catch_up_subscribers(token)` | One-shot `getUpdates` pass; onboards `/start`/join chats, then clears the update queue |
-| `remove_subscriber(chat_id, path=...)` | Drop if present; return `True` when removed |
+| `fetch_subscribers_from_csv(csv_url)` | Download + parse the published CSV; return stripped, deduplicated `chat_id` values (empty list on failure) |
 
-> **Note:** subscriber additions can originate from either side — the command
-> bot host (on `/start`) or the CI pipeline's startup pass
-> (`catch_up_subscribers`). Both write `data/subscribers.json`, so keep the file
-> in sync across hosts (commit and `git pull`). The CI run also records
-> *removals* (blocked users) and commits the result.
+### Command-bot subscribers (`data/subscribers.json`)
+
+Separate from the CSV broadcast list, the command bot still persists `/start`
+sign-ups to `data/subscribers.json` so it can answer commands and remember who
+interacted with it. The pipeline's startup pass (`catch_up_subscribers`) records
+pending `/start`/group-join chats there too, but the daily broadcast recipients
+are resolved from the CSV above.
+
+Because the published CSV is read-only, a Telegram `403` (blocked user) prunes
+only `data/subscribers.json`; a blocked CSV subscriber is skipped with a warning
+and must be removed from the Sheet manually.
 
 ## Multi-recipient dispatch (`main.py`)
 
 The broadcast stage resolves recipients and sends with per-chat isolation:
 
 ```text
-subscribers  = telegram_bot.get_subscribed_chat_ids()
+subscribers  = telegram_bot.fetch_subscribers_from_csv(GOOGLE_SHEET_CSV_URL)
 recipients   = dedupe(subscribers + [TELEGRAM_CHAT_ID])
 ```
 
-- `TELEGRAM_CHAT_ID` is **always** included as the primary channel, even if no
-  subscribers exist.
+- Subscribers are read from the published Google Sheet CSV (the `chat_id`
+  column).
+- `TELEGRAM_CHAT_ID` is **always** included as the primary/fallback channel,
+  even if no CSV subscribers exist or the CSV fails to load.
 - Duplicates are removed (a subscriber whose ID equals `TELEGRAM_CHAT_ID` is not
   sent twice).
 
@@ -178,7 +172,9 @@ For each recipient, the script:
 
 1. Calls `send_digest(...)` (format → split → send each chunk).
 2. On `TelegramForbiddenError` (HTTP 403 / `error_code: 403`) → logs a warning
-   and calls `remove_subscriber(chat_id)` to prune the blocked user.
+   and calls `remove_subscriber(chat_id)` to prune the blocked user from the
+   local subscriber file (CSV subscribers are read-only and must be removed from
+   the Sheet manually).
 3. On any other error → logs a warning and continues to the next recipient
    (one transient failure never aborts the run).
 
@@ -232,9 +228,10 @@ After the loop:
 | Variable | Required | Purpose |
 |---|---|---|
 | `GCP_SERVICE_ACCOUNT_KEY` | Yes | Base64-encoded Google service-account JSON |
-| `GOOGLE_SHEET_ID` | Yes | Target sheet ID |
+| `GOOGLE_SHEET_ID` | Yes | Target output-log sheet ID |
+| `GOOGLE_SHEET_CSV_URL` | No | Published CSV URL of the subscriber Sheet (with a `chat_id` column) |
 | `TELEGRAM_BOT_TOKEN` | Yes | Bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | Yes | Primary channel always included in the broadcast |
+| `TELEGRAM_CHAT_ID` | Yes | Primary channel always included in the broadcast (fallback if the CSV is empty/fails) |
 | `DEEPSEEK_API_KEY` | No* | DeepSeek key (falls back to titles-only if missing) |
 | `DEEPSEEK_MODEL` | No | Model override (default `deepseek-chat`) |
 | `LOG_LEVEL` | No | Log verbosity (default `INFO`) |
@@ -270,12 +267,14 @@ blocked the bot)` and "Removing from subscribers."
 **Cause:** the subscriber blocked the bot (or the bot was removed from a group).
 Telegram returns HTTP 403 / `error_code: 403`.
 
-**Behavior (automatic):** the digest script prunes that `chat_id` from
+**Behavior (automatic):** the digest script prunes that `chat_id` from the local
 `data/subscribers.json`, keeps sending to everyone else, and the workflow
-commits the removal. No manual action is required — the blocked user is simply
-not retried.
+commits the removal. If the blocked `chat_id` came from the published CSV, the
+script only logs a warning and skips it — remove that `chat_id` from the Sheet
+to stop retrying it.
 
-To resubscribe, the user must message the bot with `/start` again.
+To resubscribe, the user must message the bot with `/start` again (and be
+re-added to the subscriber Sheet if that is the broadcast source).
 
 ### `git push` rejected — non-fast-forward (rebase)
 
@@ -310,6 +309,7 @@ add a `git pull --rebase origin main` before the `git push` in the commit step.
 | `Failed to decode GCP_SERVICE_ACCOUNT_KEY` | Value isn't valid Base64 of a service-account JSON |
 | `/latest` returns "No digest available yet" | `latest_digest.txt` not generated — run `python main.py` |
 | `getUpdates` error | Wrong `TELEGRAM_BOT_TOKEN` |
+| `Failed to fetch subscriber CSV` warning | `GOOGLE_SHEET_CSV_URL` missing or not published; the broadcast falls back to `TELEGRAM_CHAT_ID` |
 | A "You're all caught up" notice, no digest | No new opportunities — the catch-up notice is the expected output |
 
 ---

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import csv
 import html
+import io
 import json
 import logging
 import os
 import time
+import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, List
 
@@ -220,6 +223,55 @@ def remove_subscriber(chat_id: str, path: str = SUBSCRIBERS_FILE) -> bool:
     save_subscribers(remaining, path)
     logger.info("Removed subscriber %s (%d total).", chat_id, len(remaining))
     return True
+
+
+# ---------------------------------------------------------------------------
+# CSV subscriber fetch (published Google Sheet)
+# ---------------------------------------------------------------------------
+def fetch_subscribers_from_csv(csv_url: str) -> List[str]:
+    """Download a published Google Sheet CSV and return its ``chat_id`` values.
+
+    Fetches the CSV over HTTP (``urllib.request``), parses it with the standard
+    ``csv`` module, reads the ``chat_id`` column, and returns each value with
+    surrounding quotes/whitespace/formatting stripped. Duplicates are dropped
+    while preserving order. Returns an empty list if the URL is blank, the
+    download fails, or the column is missing, so callers can fall back to
+    ``TELEGRAM_CHAT_ID``.
+    """
+    if not csv_url:
+        logger.warning("GOOGLE_SHEET_CSV_URL is empty; no CSV subscribers fetched.")
+        return []
+
+    try:
+        request = urllib.request.Request(
+            csv_url, headers={"User-Agent": "aerospace-bot/1.0"}
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read().decode("utf-8-sig")
+    except Exception as exc:
+        logger.warning("Failed to fetch subscriber CSV from %s: %s", csv_url, exc)
+        return []
+
+    try:
+        reader = csv.DictReader(io.StringIO(raw))
+        chat_ids: List[str] = []
+        for row in reader:
+            # ``chat_id`` may be quoted, padded, or stored with an apostrophe to
+            # force text formatting; strip quotes, apostrophes, and whitespace.
+            value = (row.get("chat_id") or "").strip().strip("'\"").strip()
+            if value:
+                chat_ids.append(value)
+    except Exception as exc:
+        logger.warning("Failed to parse subscriber CSV: %s", exc)
+        return []
+
+    unique: List[str] = []
+    seen = set()
+    for chat_id in chat_ids:
+        if chat_id not in seen:
+            seen.add(chat_id)
+            unique.append(chat_id)
+    return unique
 
 
 # ---------------------------------------------------------------------------

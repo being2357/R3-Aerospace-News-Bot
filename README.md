@@ -28,29 +28,32 @@ the digest fresh daily.
   summaries per article.
 - **Telegram command bot** — `/start`, `/latest`, and `/help`, backed by a local
   `latest_digest.txt` cache. Every chat that sends `/start` is persisted to
-  `data/subscribers.json` for the daily broadcast, and the pipeline's startup
-  pass onboards any pending `/start` or group-join before scraping.
+  `data/subscribers.json` for the command bot, and the pipeline's startup pass
+  onboards any pending `/start` or group-join before scraping.
+- **Subscriber list from Google Sheets** — the daily broadcast reads chat IDs
+  from a published Google Sheet CSV (`GOOGLE_SHEET_CSV_URL`), with
+  `TELEGRAM_CHAT_ID` always included as the primary/fallback recipient.
 - **Daily automation** — a GitHub Actions cron (18:00 UTC) runs the pipeline,
-  posts to every subscriber plus the primary `TELEGRAM_CHAT_ID`, prunes users who
-  have blocked the bot, and commits the digest + subscriber list back to the
-  repository.
+  posts to every CSV subscriber plus the primary `TELEGRAM_CHAT_ID`, prunes
+  blocked users from the local subscriber file, and commits the digest +
+  subscriber list back to the repository.
 
 ## Architecture
 
 ```
-config/sources.json ──► scrapers/feed_parser.py   (RSS/Atom)
-                        scrapers/web_scraper.py    (HTML, async)
-                        scrapers/nasa_scraper.py   (JSON API)
-                        scrapers/http_utils.py     (shared httpx + tenacity)
-                        cache_store.py  dedup.py   (etag + seen state)
+config.py ──► scrapers/feed_parser.py   (RSS/Atom)
+              scrapers/web_scraper.py    (HTML, async)
+              scrapers/nasa_scraper.py   (JSON API)
+              scrapers/http_utils.py     (shared httpx + tenacity)
+              cache_store.py  dedup.py   (etag + seen state)
 
 main.py ─► summarizer/ai_engine.py (DeepSeek) ─► storage/sheets_client.py
-       └─► notifier/telegram_bot.py ◄── latest_digest.txt, data/subscribers.json
+       └─► notifier/telegram_bot.py ◄── latest_digest.txt, GOOGLE_SHEET_CSV_URL
 ```
 
 | Path | Purpose |
 |---|---|
-| `config/sources.json` | Source registry (RSS, HTML, JSON API targets; category hint) |
+| `config.py` | Internal source registry (RSS, HTML, JSON API targets; category hint) |
 | `scrapers/feed_parser.py` | RSS/Atom ingestion with conditional GET (ETag/Last-Modified) |
 | `scrapers/web_scraper.py` | Concurrent HTML fallback scraper (`httpx.AsyncClient` + `asyncio.gather`) |
 | `scrapers/nasa_scraper.py` | NASA JSON ingestion via the WordPress REST API |
@@ -61,7 +64,7 @@ main.py ─► summarizer/ai_engine.py (DeepSeek) ─► storage/sheets_client.p
 | `summarizer/ai_engine.py` | DeepSeek classification + summarization |
 | `notifier/telegram_bot.py` | Telegram HTML delivery + command bot + subscriber onboarding/persistence |
 | `main.py` | Orchestrator + topic filter + dedup + digest cache + multi-recipient send |
-| `data/subscribers.json` | Persisted subscriber chat IDs (added on `/start`, pruned on block) |
+| `data/subscribers.json` | Command-bot subscriber chat IDs (added on `/start`, pruned on block) |
 | `cache/` | Persisted ETag/Last-Modified + seen-hash state (committed + actions/cache) |
 | `.github/workflows/daily_digest.yml` | Daily cron + state-file auto-commit |
 | `models.py` | Shared `Article` dataclass + category/section constants |
@@ -72,8 +75,9 @@ There are two entry points:
 
 1. **Daily pipeline** — `python main.py` first onboards pending subscribers (a
    one-shot `getUpdates` pass), then scrapes sources, filters, classifies,
-   summarizes, logs to Sheets, posts the digest to every chat in
-   `data/subscribers.json` plus the primary `TELEGRAM_CHAT_ID`, and writes
+   summarizes, logs to Sheets, fetches subscriber chat IDs from the published
+   Google Sheet CSV (`GOOGLE_SHEET_CSV_URL`), posts the digest to those chats
+   plus the primary `TELEGRAM_CHAT_ID` (the fallback), and writes
    `latest_digest.txt`.
 2. **Command bot** — `python -m notifier.telegram_bot` long-polls Telegram and
    answers commands from the `latest_digest.txt` cache, saving each `/start` chat
@@ -88,7 +92,8 @@ available after a `git pull` for a bot running elsewhere).
 
 - Python 3.10+
 - A Google Cloud project with a service account (Sheets + Drive APIs enabled)
-- A Google Sheet
+- A Google Sheet (the output log of delivered articles)
+- A published Google Sheet with a `chat_id` column (the subscriber list)
 - A Telegram bot (via [@BotFather](https://t.me/BotFather))
 - A [DeepSeek API key](https://platform.deepseek.com/)
 
@@ -111,11 +116,12 @@ Then fill in the values (see `.env.example`):
 | Variable | Purpose |
 |---|---|
 | `GCP_SERVICE_ACCOUNT_KEY` | Base64-encoded Google service-account JSON |
-| `GOOGLE_SHEET_ID` | The `<ID>` from `spreadsheets/d/<ID>/edit` |
+| `GOOGLE_SHEET_ID` | The `<ID>` from `spreadsheets/d/<ID>/edit` (output log) |
+| `GOOGLE_SHEET_CSV_URL` | Published CSV URL of the subscriber Google Sheet (must have a `chat_id` column) |
 | `DEEPSEEK_API_KEY` | DeepSeek API key |
 | `DEEPSEEK_MODEL` | Optional model override (default `deepseek-chat`) |
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | Chat/channel that receives the daily post |
+| `TELEGRAM_CHAT_ID` | Primary chat/channel that always receives the daily post (fallback if the CSV is empty/fails) |
 
 ### 3. Google Sheets + service account
 
@@ -154,19 +160,41 @@ A: Timestamp   B: Source   C: Title   D: URL   E: Category   F: Sent Flag
    `getUpdates` endpoint, or add the bot to a channel and use the channel ID
    (e.g. `@mychannel`).
 3. Anyone who messages the bot with `/start` (or adds the bot to a group) is
-   automatically added to `data/subscribers.json` and receives the digest on
-   every run, alongside the primary `TELEGRAM_CHAT_ID`. The pipeline picks up
-   pending sign-ups at the start of each run, so new subscribers are included in
-   the same day's digest.
+   recorded in `data/subscribers.json` for the command bot. The daily *broadcast*
+   recipient list comes from the published Google Sheet CSV (see the next
+   section), with `TELEGRAM_CHAT_ID` always included.
 
-### 5. DeepSeek
+### 5. Subscriber list (published Google Sheet CSV)
+
+The daily digest is sent to every chat ID listed in a Google Sheet, read as a
+published CSV:
+
+1. Create a Google Sheet with a header row containing a `chat_id` column (matched
+   by name, so it can be in any position).
+2. Add one Telegram chat ID per row — private, group, or channel IDs (groups and
+   channels use negative IDs such as `-1001234567890`).
+3. Publish it as CSV: **File → Share → Publish to web**, choose **Comma-separated
+   values (.csv)**, and copy the URL.
+4. Set `GOOGLE_SHEET_CSV_URL` to that URL.
+
+On each run the bot downloads and parses that CSV, reads the `chat_id` column,
+strips quotes/whitespace/formatting, and broadcasts to those chats.
+`TELEGRAM_CHAT_ID` is always included as a fallback primary recipient, so the
+digest still delivers even if the CSV is empty or fails to load.
+
+> **Note:** the published CSV is read-only, so the bot cannot prune blocked
+> users from it. If a CSV subscriber blocks the bot, that send fails with a
+> warning and you should remove the `chat_id` from the Sheet manually.
+
+### 6. DeepSeek
 
 Set `DEEPSEEK_API_KEY` (and optionally `DEEPSEEK_MODEL` to override the default
 `deepseek-chat`, e.g. `deepseek-v4-flash`).
 
-### 6. Configure sources
+### 7. Configure sources
 
-Edit `config/sources.json`. Each entry carries a `type` that selects the scraper:
+Edit `config.py` — the `SOURCES` list holds every source as a Python dict. Each
+entry carries a `type` that selects the scraper:
 
 | `type` | Scraper | Meaning |
 |---|---|---|
@@ -178,27 +206,27 @@ Edit `config/sources.json`. Each entry carries a `type` that selects the scraper
 
 HTML sources:
 
-```json
+```python
 {
-  "id": "esa_academy",
-  "name": "ESA Academy (Student Opportunities)",
-  "type": "html_list",
-  "url": "https://www.esa.int/Education/ESA_Academy",
-  "category": "internships",
-  "selectors": { "item": "a[href]", "title": "h2" }
+    "id": "esa_academy",
+    "name": "ESA Academy (Student Opportunities)",
+    "type": "html_list",
+    "url": "https://www.esa.int/Education/ESA_Academy",
+    "category": "internships",
+    "selectors": {"item": "a[href]", "title": "h2"},
 }
 ```
 
 JSON API sources (NASA):
 
-```json
+```python
 {
-  "id": "nasa_internships",
-  "name": "NASA Internships & Careers",
-  "type": "api",
-  "parser": "nasa_wp",
-  "query": ["internship", "fellowship"],
-  "category": "internships"
+    "id": "nasa_internships",
+    "name": "NASA Internships & Careers",
+    "type": "api",
+    "parser": "nasa_wp",
+    "query": ["internship", "fellowship"],
+    "category": "internships",
 }
 ```
 
@@ -221,9 +249,10 @@ Daily pipeline:
 
 ```bash
 python main.py
-# or with a custom config:
-python main.py --config path/to/sources.json
 ```
+
+Sources are defined in `config.py`; there is no external config file or
+`--config` flag.
 
 Command bot (run from the project root, with dependencies installed — it imports
 `main` to reach the cache helper):
@@ -249,8 +278,8 @@ Set `LOG_LEVEL=DEBUG` for verbose output.
 
 1. Push the repository to GitHub.
 2. Add these secrets under **Settings → Secrets and variables → Actions**:
-   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DEEPSEEK_API_KEY`,
-   `GCP_SERVICE_ACCOUNT_KEY`, `GOOGLE_SHEET_ID`.
+   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GOOGLE_SHEET_CSV_URL`,
+   `DEEPSEEK_API_KEY`, `GCP_SERVICE_ACCOUNT_KEY`, `GOOGLE_SHEET_ID`.
 3. The workflow runs daily at **18:00 UTC** (and on manual dispatch), then
    commits `latest_digest.txt`, `data/subscribers.json`, and `cache/` back to the
    repository (and restores `cache/` via `actions/cache`). The job declares
@@ -275,8 +304,10 @@ Set `LOG_LEVEL=DEBUG` for verbose output.
 - **Telegram send failure** — per-recipient failures are logged and skipped; if
   the digest reaches no recipient at all, the run exits non-zero (visible in
   Actions) and the affected articles stay "unsent" so they are retried.
-- **Blocked user** — a `403 Forbidden` from Telegram removes that chat from
-  `data/subscribers.json` (committed by the workflow) so it is not retried.
+- **Blocked user** — a `403 Forbidden` from Telegram removes that chat from the
+  local `data/subscribers.json` (committed by the workflow) so it is not retried.
+  CSV subscribers are read-only, so a blocked CSV user is skipped with a warning
+  and must be removed from the published Sheet manually.
 - **Auth failures** — raised with a clear message (e.g. "share the sheet with
   the service-account email").
 
@@ -289,4 +320,5 @@ Set `LOG_LEVEL=DEBUG` for verbose output.
 | `DEEPSEEK_API_KEY is not set` | Missing secret / `.env` entry. |
 | `/latest` returns "No digest available yet" | `latest_digest.txt` not generated yet — run `python main.py`. |
 | `getUpdates` error when running the bot | Wrong `TELEGRAM_BOT_TOKEN`. |
+| `Failed to fetch subscriber CSV` warning | `GOOGLE_SHEET_CSV_URL` missing or not published; the digest falls back to `TELEGRAM_CHAT_ID`. |
 | A "You're all caught up" notice, no digest | No new opportunities — the catch-up notice is the expected output. |

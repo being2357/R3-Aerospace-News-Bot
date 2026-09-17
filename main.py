@@ -8,8 +8,6 @@ Flow:
 
 from __future__ import annotations
 
-import argparse
-import json
 import logging
 import os
 import re
@@ -18,6 +16,7 @@ from typing import Dict, List, Set
 
 from dotenv import load_dotenv
 
+import config
 from dedup import SeenStore, item_hash
 from models import ALLOWED_CATEGORIES, Article
 from notifier import telegram_bot
@@ -183,11 +182,23 @@ def save_digest(text: str, path: str = DIGEST_FILE) -> None:
     logger.info("Saved latest digest to %s", path)
 
 
-def _notify_no_new_content(token: str, primary_chat_id: str) -> None:
+def get_recipients(csv_url: str | None, primary_chat_id: str) -> List[str]:
+    """Resolve broadcast recipients from the published Sheet CSV + primary chat.
+
+    Subscriber chat IDs come from the published Google Sheet CSV
+    (``GOOGLE_SHEET_CSV_URL``). ``TELEGRAM_CHAT_ID`` is always appended as the
+    fallback primary recipient, so a failed or empty CSV still delivers to at
+    least one chat. Duplicates are removed.
+    """
+    subscribers = telegram_bot.fetch_subscribers_from_csv(csv_url)
+    return list(dict.fromkeys([*subscribers, primary_chat_id]))
+
+
+def _notify_no_new_content(
+    token: str, primary_chat_id: str, csv_url: str | None
+) -> None:
     """Broadcast the friendly "caught up" notice to every subscriber + primary chat."""
-    recipients = list(
-        dict.fromkeys([*telegram_bot.get_subscribed_chat_ids(), primary_chat_id])
-    )
+    recipients = get_recipients(csv_url, primary_chat_id)
     logger.info("Sending no-new-content notice to %d recipient(s).", len(recipients))
     telegram_bot.send_notice(token, recipients)
 
@@ -198,27 +209,6 @@ def setup_logging() -> None:
         level=getattr(logging, level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Aggregate, classify, and post aerospace opportunities."
-    )
-    parser.add_argument(
-        "--config",
-        default="config/sources.json",
-        help="Path to the sources JSON config (default: config/sources.json)",
-    )
-    return parser.parse_args()
-
-
-def load_sources(path: str) -> List[dict]:
-    with open(path, "r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    sources = data.get("sources", [])
-    if not sources:
-        logger.error("No sources defined in %s", path)
-    return sources
 
 
 def normalize_source(source: dict) -> dict:
@@ -257,10 +247,10 @@ def require_env(name: str) -> str:
 def main() -> None:
     load_dotenv()
     setup_logging()
-    args = parse_args()
 
-    sources = [normalize_source(s) for s in load_sources(args.config)]
+    sources = [normalize_source(s) for s in config.SOURCES]
     if not sources:
+        logger.error("No sources defined in config.SOURCES.")
         sys.exit(1)
 
     sheet_id = require_env("GOOGLE_SHEET_ID")
@@ -268,10 +258,12 @@ def main() -> None:
     telegram_token = require_env("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = require_env("TELEGRAM_CHAT_ID")
     deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+    csv_url = os.getenv("GOOGLE_SHEET_CSV_URL")
 
     # 0. Onboard any pending subscribers (chats that sent /start or added the
-    #    bot to a group since the last run) before we scrape, so they are
-    #    included in today's dispatch. This also clears Telegram's update queue.
+    #    bot to a group since the last run). This records them for the command
+    #    bot and clears Telegram's update queue; the broadcast recipient list
+    #    itself is resolved from the published Sheet CSV in step 8.
     telegram_bot.catch_up_subscribers(telegram_token)
 
     # 1. Google Sheets: authenticate and load existing URLs for dedup.
@@ -328,7 +320,7 @@ def main() -> None:
     if not to_process:
         logger.info("No new opportunities to send.")
         save_digest(NO_OPPORTUNITIES_MESSAGE)
-        _notify_no_new_content(telegram_token, telegram_chat_id)
+        _notify_no_new_content(telegram_token, telegram_chat_id, csv_url)
         return
 
     # 6. Classify + summarize via DeepSeek (falls back to titles-only).
@@ -345,7 +337,7 @@ def main() -> None:
     if not delivered_urls:
         logger.info("No articles survived strict classification; nothing to post.")
         save_digest(NO_OPPORTUNITIES_MESSAGE)
-        _notify_no_new_content(telegram_token, telegram_chat_id)
+        _notify_no_new_content(telegram_token, telegram_chat_id, csv_url)
         return
 
     # 7. Cache the digest text, then log the delivered fresh articles and mark
@@ -355,10 +347,10 @@ def main() -> None:
     sheets.append_articles(delivered_fresh, sent=False)
     seen_store.add([item_hash(a.title, a.url) for a in delivered_fresh])
 
-    # 8. Post to Telegram: the primary channel plus every subscriber. Per-chat
-    #    failures are isolated so one blocked user never aborts the whole run.
-    subscribers = telegram_bot.get_subscribed_chat_ids()
-    recipients = list(dict.fromkeys([*subscribers, telegram_chat_id]))
+    # 8. Post to Telegram: the primary channel plus every subscriber (from the
+    #    published Sheet CSV). Per-chat failures are isolated so one blocked
+    #    user never aborts the whole run.
+    recipients = get_recipients(csv_url, telegram_chat_id)
     logger.info("Sending digest to %d recipient(s).", len(recipients))
     delivered_any = False
     for chat_id in recipients:
