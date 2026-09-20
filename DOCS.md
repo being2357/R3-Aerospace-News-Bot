@@ -207,12 +207,11 @@ After the loop:
    `aero-cache-${{ github.run_id }}`, prefix `aero-cache-`) so ETag/Last-Modified
    and seen-hash state carry over between runs; a new entry is saved on success.
 5. **Run daily digest** — `python main.py` with secrets in the environment.
-6. **Commit and push state files** — stages `latest_digest.txt`,
-   `data/subscribers.json`, and `cache/`, commits as `github-actions[bot]`, and
-   pushes:
+6. **Commit and push state files** — stages `latest_digest.txt` and `cache/`,
+   commits as `github-actions[bot]`, and pushes:
 
    ```bash
-   git add latest_digest.txt data/subscribers.json cache/
+   git add -A -- latest_digest.txt cache/
    if git diff --cached --quiet; then
      echo 'No state changes to commit.'
    else
