@@ -1,18 +1,14 @@
-<b>🛰️ Aerospace Opportunities Digest — 2026-10-19</b>
+<b>🛰️ Aerospace Opportunities Digest — 2026-10-20</b>
 
 <b>🎓 Internships &amp; Student Opportunities</b>
-• <a href="https://education.esa.int/apply-for-the-satellite-communication-systems-training-course-2027/">Training Apply for the Satellite Communication Systems Training Course 2027 19/10/2026 Read more</a>
-• <a href="https://education.esa.int/portugals-euroc-rocketry-challenge-flies-higher-with-esa/">Rocketry Portugal’s EuRoC rocketry challenge flies higher with ESA 14/10/2026 Read more</a>
-• <a href="https://education.esa.int/about-the-funding-opportunities/">Funding Opportunities About the Funding Opportunities 12/10/2026 Read more</a>
-• <a href="https://education.esa.int/apply_for_the_ladybird_guide_to_spacecraft_communications_2027/">Training Apply for the Ladybird Guide to Spacecraft Communications 2027 06/10/2026 Read more</a>
-• <a href="https://education.esa.int/apply_for_space_technology_and_commercialisation_workshop_2027/">Training Apply for Space Technology and Commercialisation Workshop 2027 28/09/2026 Read more</a>
+• <a href="https://education.esa.int/apply_for_the_first_space_policy_in_action_training_course/">Training Apply for the first Space Policy in Action training course 25/08/2026 Read more</a>
 
 <b>🏆 Competitions &amp; Hackathons</b>
-• <a href="https://education.esa.int/cansat_2026-2027_challenge_your_students_to_build_a_can-sized_satellite/">CanSat CanSat 2026-2027: Challenge your students to build a can-sized satellite 01/10/2026 Read more</a>
-• <a href="https://education.esa.int/cansat_space_engineer_for_a_day_2026_event_inspires_next_space_generation/">CanSat CanSat Space Engineer for a Day 2026 event inspires next space generation 10/09/2026 Read more</a>
-• <a href="https://education.esa.int/meet-arduino-introduction-to-arduino-computing-using-c-teach-with-space-t04-1/">CanSat Meet Arduino! Introduction to Arduino and  C++ 07/08/2026 Read more</a>
-• <a href="https://education.esa.int/communicating-with-radio-ground-control-to-major-cansat-teach-with-space-t11/">CanSat Radio communication: Ground Control to Major CanSat 24/07/2026 Read more</a>
-• <a href="https://education.esa.int/design-your-parachute-a-guide-to-landing-your-cansat-safely-teach-with-space-t10/">CanSat Design your parachute: Landing Your CanSat Safely 24/07/2026 Read more</a>
-• <a href="https://education.esa.int/getting-started-with-cansat-a-guide-to-the-primary-mission-teach-with-space-t08/">CanSat Getting Started with CanSat: The Primary Mission 24/07/2026 Read more</a>
-• <a href="https://education.esa.int/outstanding_event_at_estec_for_national_winners_of_esa-esero_cansat_project/">CanSat Outstanding event at ESTEC for national winners of ESA-ESERO CanSat project 25/06/2025 Read more</a>
-• <a href="https://education.esa.int/space_engineer_for_a_day_a_celebration_for_the_students_of_cansat_2023-2024/">CanSat ‘Space Engineer for a Day’ – a celebration for the students of CanSat 2023-2024 21/06/2024 Read more</a>
+• <a href="https://education.esa.int/cansat_2025-2026_challenge_your_students_to_build_a_can-sized_satellite/">CanSat CanSat 2025-2026: Challenge your students to build a can-sized satellite 15/09/2025 Read more</a>
+• <a href="https://education.esa.int/highlights_of_the_2023_european_cansat_competition_reports_and_outlook_for_2024/">CanSat Highlights of the 2023 European CanSat Competition Reports and Outlook for 2024 05/01/2024 Read more</a>
+• <a href="https://education.esa.int/join_cansat_2023-2024/">CanSat Join CanSat 2023-2024 19/09/2023 Read more</a>
+• <a href="https://education.esa.int/cansat_2023_a_total_success/">CanSat CanSat 2023 – a total success 10/07/2023 Read more</a>
+• <a href="https://education.esa.int/one_week_till_lift-off_meet_the_participating_teams/">CanSat One week till lift-off: Meet the participating teams! 21/06/2023 Read more</a>
+• <a href="https://education.esa.int/looking_back_on_cansat_2022_and_forward_to_2023/">CanSat Looking back on CanSat 2022 and forward to 2023 27/01/2023 Read more</a>
+• <a href="https://education.esa.int/amazing_winners_of_the_first-ever_virtual_european_cansat_competition/">CanSat Amazing winners of the first-ever virtual European CanSat Competition 13/10/2021 Read more</a>
+• <a href="https://education.esa.int/celebrate_cansat_during_the_online_outreach_event/">CanSat Celebrate CanSat during the online Outreach Event 20/09/2021 Read more</a>
